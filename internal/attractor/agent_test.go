@@ -63,6 +63,7 @@ func TestBuildCodexExecArgs(t *testing.T) {
 		ConfigOverrides:      []string{`foo.bar=1`},
 		AutoApproveCommands:  []string{"git status", "go test"},
 		AutoApproveConfigKey: "tools.trusted_commands",
+		SkipGitRepoCheck:     true,
 	}
 	args, err := buildCodexExecArgs(opts, "/tmp/schema.json", "/tmp/out.json")
 	if err != nil {
@@ -76,6 +77,7 @@ func TestBuildCodexExecArgs(t *testing.T) {
 		"-p default",
 		"-c foo.bar=1",
 		"-C /tmp/work",
+		"--skip-git-repo-check",
 		"--add-dir /tmp/one",
 		"--add-dir /tmp/two",
 		"--output-schema /tmp/schema.json",

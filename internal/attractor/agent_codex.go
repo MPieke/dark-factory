@@ -70,11 +70,12 @@ func (a codexAgent) Run(req AgentRequest) (AgentResponse, error) {
 
 func buildCodexExecArgs(opts CodexOptions, schemaPath, outputPath string) ([]string, error) {
 	args := []string{}
-	if opts.SandboxMode != "" {
-		args = append(args, "-s", opts.SandboxMode)
-	}
 	if opts.ApprovalPolicy != "" {
 		args = append(args, "-a", opts.ApprovalPolicy)
+	}
+	args = append(args, "exec")
+	if opts.SandboxMode != "" {
+		args = append(args, "-s", opts.SandboxMode)
 	}
 	if opts.Model != "" {
 		args = append(args, "-m", opts.Model)
@@ -92,9 +93,11 @@ func buildCodexExecArgs(opts CodexOptions, schemaPath, outputPath string) ([]str
 		override := fmt.Sprintf("%s=%s", opts.AutoApproveConfigKey, toTOMLArray(opts.AutoApproveCommands))
 		args = append(args, "-c", override)
 	}
-	args = append(args, "exec")
 	if opts.Workdir != "" {
 		args = append(args, "-C", opts.Workdir)
+	}
+	if opts.SkipGitRepoCheck {
+		args = append(args, "--skip-git-repo-check")
 	}
 	for _, d := range opts.AddDirs {
 		args = append(args, "--add-dir", d)
@@ -122,7 +125,7 @@ const codexOutcomeSchema = `{
   "title": "AttractorCodexOutcome",
   "type": "object",
   "additionalProperties": false,
-  "required": ["outcome"],
+  "required": ["outcome", "preferred_next_label", "suggested_next_ids", "context_updates", "notes", "failure_reason"],
   "properties": {
     "outcome": {
       "type": "string",
@@ -137,7 +140,8 @@ const codexOutcomeSchema = `{
     },
     "context_updates": {
       "type": "object",
-      "additionalProperties": true
+      "properties": {},
+      "additionalProperties": false
     },
     "notes": {
       "type": "string"

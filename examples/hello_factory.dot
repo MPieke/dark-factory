@@ -1,0 +1,30 @@
+digraph HelloFactory {
+  graph [goal="Create a working Go CLI that prints Hello World"];
+
+  start [shape=Mdiamond];
+  exit  [shape=Msquare];
+
+  generate [
+    shape=box,
+    allowed_write_paths="main.go,go.mod",
+    prompt="You are in a Go workspace.\n\nTask:\nCreate a CLI program that prints 'Hello, world!'.\n\nConstraints:\n- Only modify: main.go, go.mod\n- Do NOT modify other files\n- Code must compile\n\nWhen done, ensure it builds with:\ngo build .\n"
+  ];
+
+  test [
+    shape=parallelogram,
+    tool_command="go build ."
+  ];
+
+  fix [
+    shape=box,
+    allowed_write_paths="main.go,go.mod",
+    prompt="The previous build failed.\n\nFix the code so that:\n- go build . succeeds\n- Only modify main.go or go.mod\n\nDo not introduce new files unless necessary.\n"
+  ];
+
+  start -> generate -> test;
+
+  test -> exit [condition="outcome=success"];
+  test -> fix  [condition="outcome=fail"];
+
+  fix -> test;
+}

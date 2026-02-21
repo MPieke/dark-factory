@@ -37,6 +37,7 @@ type CodexOptions struct {
 	ConfigOverrides      []string
 	AutoApproveCommands  []string
 	AutoApproveConfigKey string
+	SkipGitRepoCheck     bool
 	DangerousBypass      bool
 }
 
@@ -91,6 +92,7 @@ func codexOptionsFromNodeAndEnv(node *Node, workspace string) (CodexOptions, err
 		Profile:        pickString(node.StringAttr("codex.profile", ""), os.Getenv("ATTRACTOR_CODEX_PROFILE"), ""),
 	}
 	opts.DangerousBypass = node.BoolAttr("codex.dangerous_bypass", false) || parseBoolEnv("ATTRACTOR_CODEX_DANGEROUS_BYPASS")
+	opts.SkipGitRepoCheck = node.BoolAttr("codex.skip_git_repo_check", false) || parseBoolEnv("ATTRACTOR_CODEX_SKIP_GIT_REPO_CHECK")
 	opts.AddDirs = pickList(node.StringAttr("codex.add_dirs", ""), os.Getenv("ATTRACTOR_CODEX_ADD_DIRS"))
 	opts.ConfigOverrides = pickConfigOverrides(node.StringAttr("codex.config_overrides", ""), os.Getenv("ATTRACTOR_CODEX_CONFIG_OVERRIDES"))
 	opts.AutoApproveCommands = pickList(node.StringAttr("codex.auto_approve_commands", ""), os.Getenv("ATTRACTOR_CODEX_AUTO_APPROVE_COMMANDS"))
