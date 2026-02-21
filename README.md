@@ -106,6 +106,47 @@ Example:
 ATTRACTION_BACKEND=fake ./bin/attractor run pipeline.dot --workdir . --runsdir ./runs --run-id fake-demo
 ```
 
+## Codex backend (real agent execution)
+
+`codergen` nodes can run through a pluggable agent interface. The built-in real backend is `codex`.
+
+Enable it:
+
+```bash
+ATTRACTOR_AGENT_BACKEND=codex ./bin/attractor run pipeline.dot --workdir . --runsdir ./runs --run-id codex-demo
+```
+
+You can configure Codex at node level (`codex.*` attrs) or via env vars:
+
+- Sandbox:
+  - attr: `codex.sandbox`
+  - env: `ATTRACTOR_CODEX_SANDBOX`
+- Approval policy:
+  - attr: `codex.approval`
+  - env: `ATTRACTOR_CODEX_APPROVAL`
+- Working directory:
+  - attr: `codex.workdir` (relative to run workspace, or absolute)
+  - env: `ATTRACTOR_CODEX_WORKDIR`
+- Additional writable directories:
+  - attr: `codex.add_dirs` (CSV)
+  - env: `ATTRACTOR_CODEX_ADD_DIRS` (CSV)
+- Auto-approved command list via config override key:
+  - attr: `codex.auto_approve_commands` (CSV)
+  - attr: `codex.auto_approve_config_key` (target Codex config key)
+  - env: `ATTRACTOR_CODEX_AUTO_APPROVE_COMMANDS`, `ATTRACTOR_CODEX_AUTO_APPROVE_CONFIG_KEY`
+- Raw Codex config overrides:
+  - attr: `codex.config_overrides` (`;;`-separated `key=value` entries)
+  - env: `ATTRACTOR_CODEX_CONFIG_OVERRIDES`
+- Optional model/profile:
+  - attr: `codex.model`, `codex.profile`
+  - env: `ATTRACTOR_CODEX_MODEL`, `ATTRACTOR_CODEX_PROFILE`
+
+Codex outputs and schema are written per node:
+- `<node>/codex.output.schema.json`
+- `<node>/codex.stdout.log`
+- `<node>/codex.stderr.log`
+- `<node>/response.md` (JSON response mapped to stage outcome)
+
 ## Smoke script
 
 Run the included smoke test:
