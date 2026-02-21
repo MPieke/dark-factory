@@ -419,7 +419,7 @@ func exitReason(code int) string {
 	return fmt.Sprintf("tool_exit_code_%d", code)
 }
 
-func (codergenHandler) Execute(node *Node, ctx Context, g *Graph, nodeDir string, _ string) (Outcome, error) {
+func (codergenHandler) Execute(node *Node, ctx Context, g *Graph, nodeDir string, workspace string) (Outcome, error) {
 	prompt := node.StringAttr("prompt", node.Label())
 	if goal, ok := g.Attrs["goal"]; ok {
 		prompt = strings.ReplaceAll(prompt, "$goal", fmt.Sprintf("%v", goal))
@@ -431,20 +431,39 @@ func (codergenHandler) Execute(node *Node, ctx Context, g *Graph, nodeDir string
 	if backend == "" {
 		backend = os.Getenv("ATTRACTOR_BACKEND")
 	}
-	if backend != "fake" {
-		resp := "real backend not configured in v0; default success"
-		_ = os.WriteFile(filepath.Join(nodeDir, "response.md"), []byte(resp+"\n"), 0o644)
-		return Outcome{SchemaVersion: 1, Outcome: "success", Notes: resp, SuggestedNextIDs: []string{}, ContextUpdates: map[string]any{}}, nil
+	if backend == "fake" {
+		outcome := outcomeFromTestAttrs(node, ctx)
+		nextLabel := node.StringAttr("test.preferred_next_label", "")
+		suggest := splitCSV(node.StringAttr("test.suggested_next_ids", ""))
+		notes := node.StringAttr("test.notes", "fake backend")
+		resp := fmt.Sprintf("outcome=%s\n", outcome)
+		if writeErr := os.WriteFile(filepath.Join(nodeDir, "response.md"), []byte(resp), 0o644); writeErr != nil {
+			return Outcome{}, writeErr
+		}
+		return Outcome{SchemaVersion: 1, Outcome: outcome, PreferredNextLabel: nextLabel, SuggestedNextIDs: suggest, Notes: notes, ContextUpdates: map[string]any{}}, nil
 	}
-	outcome := outcomeFromTestAttrs(node, ctx)
-	nextLabel := node.StringAttr("test.preferred_next_label", "")
-	suggest := splitCSV(node.StringAttr("test.suggested_next_ids", ""))
-	notes := node.StringAttr("test.notes", "fake backend")
-	resp := fmt.Sprintf("outcome=%s\n", outcome)
-	if writeErr := os.WriteFile(filepath.Join(nodeDir, "response.md"), []byte(resp), 0o644); writeErr != nil {
-		return Outcome{}, writeErr
+	agent, err := ResolveAgent(node, workspace)
+	if err != nil {
+		return Outcome{}, err
 	}
-	return Outcome{SchemaVersion: 1, Outcome: outcome, PreferredNextLabel: nextLabel, SuggestedNextIDs: suggest, Notes: notes, ContextUpdates: map[string]any{}}, nil
+	resp, err := agent.Run(AgentRequest{
+		Prompt:    prompt,
+		NodeID:    node.ID,
+		NodeDir:   nodeDir,
+		Workspace: workspace,
+	})
+	if err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{
+		SchemaVersion:      1,
+		Outcome:            resp.Outcome,
+		PreferredNextLabel: resp.PreferredNextLabel,
+		SuggestedNextIDs:   resp.SuggestedNextIDs,
+		ContextUpdates:     resp.ContextUpdates,
+		Notes:              resp.Notes,
+		FailureReason:      resp.FailureReason,
+	}, nil
 }
 
 func outcomeFromTestAttrs(node *Node, ctx Context) string {
