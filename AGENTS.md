@@ -10,6 +10,8 @@ Use these docs as the primary context before making code changes:
    - Spec-first and test-first execution policy, anti-reward-hacking checks, and autonomous validation rules.
 4. `LESSONS_LEARNED.md`
    - Prior failure modes, root causes, and approved fixes to avoid repeating mistakes.
+5. `DEVELOPER_GUIDELINES.md`
+   - Code quality, module/package structure, and branch/PR workflow standards.
 
 ## Working rules for agents in this repo
 - Preserve v0 constraints unless explicitly asked to expand scope.
@@ -20,6 +22,7 @@ Use these docs as the primary context before making code changes:
   - define spec first
   - add/update tests before implementation changes
   - prefer AI-executable validation over manual review
+- Follow `DEVELOPER_GUIDELINES.md` for code structure, module boundaries, and git/PR workflow.
 - Check `LESSONS_LEARNED.md` before implementing similar flows; reuse known fixes unless requirements changed.
 - Add or update tests in `internal/attractor/*_test.go` for runtime or validation behavior changes.
 
