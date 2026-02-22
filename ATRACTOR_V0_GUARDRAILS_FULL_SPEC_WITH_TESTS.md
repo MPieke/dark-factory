@@ -42,7 +42,7 @@ Not implemented in V0 execution, but code MUST be structured so V1+ can add them
 Provide:
 
 ```bash
-attractor run <pipeline.dot> --workdir <path> --runsdir <path> [--run-id <id>] [--resume]
+factory run <pipeline.dot> --workdir <path> --runsdir <path> [--run-id <id>] [--resume]
 ```
 
 Rules:

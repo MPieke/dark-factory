@@ -31,7 +31,7 @@ go test ./...
 ## 2) Build the CLI
 
 ```bash
-go build -o ./bin/attractor ./cmd/attractor
+go build -o ./bin/factory ./cmd/factory
 ```
 
 ## 3) Create a pipeline file
@@ -57,7 +57,7 @@ digraph G {
 ## 4) Run a pipeline
 
 ```bash
-./bin/attractor run pipeline.dot --workdir . --runsdir ./runs --run-id demo
+./bin/factory run pipeline.dot --workdir . --runsdir ./runs --run-id demo
 ```
 
 Required flags:
@@ -103,7 +103,7 @@ Set `ATTRACTION_BACKEND=fake` (or `ATTRACTOR_BACKEND=fake`) to make `codergen` n
 Example:
 
 ```bash
-ATTRACTION_BACKEND=fake ./bin/attractor run pipeline.dot --workdir . --runsdir ./runs --run-id fake-demo
+ATTRACTION_BACKEND=fake ./bin/factory run pipeline.dot --workdir . --runsdir ./runs --run-id fake-demo
 ```
 
 ## Codex backend (real agent execution)
@@ -113,7 +113,7 @@ ATTRACTION_BACKEND=fake ./bin/attractor run pipeline.dot --workdir . --runsdir .
 Enable it:
 
 ```bash
-ATTRACTOR_AGENT_BACKEND=codex ./bin/attractor run pipeline.dot --workdir . --runsdir ./runs --run-id codex-demo
+ATTRACTOR_AGENT_BACKEND=codex ./bin/factory run pipeline.dot --workdir . --runsdir ./runs --run-id codex-demo
 ```
 
 You can configure Codex at node level (`codex.*` attrs) or via env vars:
