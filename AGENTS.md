@@ -12,6 +12,8 @@ Use these docs as the primary context before making code changes:
    - Prior failure modes, root causes, and approved fixes to avoid repeating mistakes.
 5. `DEVELOPER_GUIDELINES.md`
    - Code quality, module/package structure, and branch/PR workflow standards.
+6. `PIPELINE_GUIDELINES.md`
+   - How to author valid, safe, and testable v0 pipeline DOT files.
 
 ## Working rules for agents in this repo
 - Preserve v0 constraints unless explicitly asked to expand scope.
@@ -23,6 +25,7 @@ Use these docs as the primary context before making code changes:
   - add/update tests before implementation changes
   - prefer AI-executable validation over manual review
 - Follow `DEVELOPER_GUIDELINES.md` for code structure, module boundaries, and git/PR workflow.
+- Follow `PIPELINE_GUIDELINES.md` when creating or modifying pipeline DOT files.
 - Check `LESSONS_LEARNED.md` before implementing similar flows; reuse known fixes unless requirements changed.
 - Add or update tests in `internal/attractor/*_test.go` for runtime or validation behavior changes.
 
