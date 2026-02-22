@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"dark-factory/internal/attractor"
+	"dark-factory/internal/factory"
 )
 
 func main() {
