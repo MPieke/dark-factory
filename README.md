@@ -34,6 +34,26 @@ go test ./...
 go build -o ./bin/factory ./cmd/factory
 ```
 
+Optional: install as executable `factory`:
+
+```bash
+go install ./cmd/factory
+```
+
+If `factory` is not found, add Go bin to your PATH (zsh):
+
+```bash
+echo 'export PATH="$PATH:$(go env GOPATH)/bin"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+Verify:
+
+```bash
+which factory
+factory run --help
+```
+
 ## 3) Create a pipeline file
 
 Example `pipeline.dot`:
