@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-go build -o /tmp/attractor-smoke ./cmd/attractor
+go build -o /tmp/factory-smoke ./cmd/factory
 
 TMP="$(mktemp -d)"
 WORK="$TMP/work"
@@ -22,8 +22,7 @@ digraph G {
 }
 DOT
 
-ATTRACTION_BACKEND=fake /tmp/attractor-smoke run "$PIPE" --workdir "$WORK" --runsdir "$RUNS" --run-id smoke
-
+ATTRACTION_BACKEND=fake /tmp/factory-smoke run --workdir "$WORK" --runsdir "$RUNS" --run-id smoke "$PIPE"
 test -f "$RUNS/smoke/a/status.json"
 
 echo "smoke ok"

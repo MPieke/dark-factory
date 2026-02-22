@@ -98,7 +98,7 @@ func validateUnsupportedHandler(shape, typ string) error {
 		}
 	}
 	supportedShapes := map[string]bool{"Mdiamond": true, "Msquare": true, "box": true, "parallelogram": true, "": true}
-	supportedTypes := map[string]bool{"": true, "start": true, "exit": true, "codergen": true, "tool": true}
+	supportedTypes := map[string]bool{"": true, "start": true, "exit": true, "codergen": true, "tool": true, "verification": true}
 	if !supportedShapes[shape] {
 		return fmt.Errorf("unsupported shape: %s", shape)
 	}

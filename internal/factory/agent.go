@@ -15,12 +15,13 @@ type AgentRequest struct {
 }
 
 type AgentResponse struct {
-	Outcome            string         `json:"outcome"`
-	PreferredNextLabel string         `json:"preferred_next_label"`
-	SuggestedNextIDs   []string       `json:"suggested_next_ids"`
-	ContextUpdates     map[string]any `json:"context_updates"`
-	Notes              string         `json:"notes"`
-	FailureReason      string         `json:"failure_reason"`
+	Outcome            string            `json:"outcome"`
+	PreferredNextLabel string            `json:"preferred_next_label"`
+	SuggestedNextIDs   []string          `json:"suggested_next_ids"`
+	ContextUpdates     map[string]any    `json:"context_updates"`
+	VerificationPlan   *VerificationPlan `json:"verification_plan,omitempty"`
+	Notes              string            `json:"notes"`
+	FailureReason      string            `json:"failure_reason"`
 }
 
 type Agent interface {

@@ -69,3 +69,24 @@ This file records concrete failure modes seen in this repo and the fixes applied
 - Always run `go test ./...` after backend/adapter changes.
 - For pipeline experiments, use `ATTRACTION_TEST_STOP_AFTER_NODE=<id>` to stop deterministically and inspect artifacts.
 - Prefer explicit `allowed_write_paths` on executable nodes.
+
+## 8) Exact-file allowlists became tedious for generated structures
+- Failure mode:
+  - Frequent guardrail failures when generated code added files under expected directories.
+- Root cause:
+  - `allowed_write_paths` originally matched only exact file paths.
+- Fix:
+  - Added directory allowlist entries using trailing slash syntax (example: `src/`).
+- Prevention:
+  - Keep sensitive files as exact entries; use directory entries only where structural flexibility is required.
+
+## 9) Behavior checks were hard to audit when ad-hoc
+- Failure mode:
+  - Verification logic drifted into free-form commands without clear traceability.
+- Root cause:
+  - No dedicated, structured verification stage contract.
+- Fix:
+  - Added `type=verification` node that executes structured plan from context and requires `verification.allowed_commands`.
+  - Persisted `verification.plan.json` and `verification.results.json` artifacts.
+- Prevention:
+  - For behavior-based validation flows, require explicit verification plan + command prefix allowlist.

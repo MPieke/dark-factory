@@ -38,7 +38,8 @@ Tradeoff:
 
 ## 4) File write guardrails (`allowed_write_paths`)
 Decision:
-- Node-level allowlist can restrict changed files to exact relative paths.
+- Node-level allowlist can restrict changed files to exact relative paths and directory prefixes.
+- Directory entries are expressed with trailing slash (example: `src/`).
 - Guardrails fail the stage if diffs include paths outside the allowlist.
 - Validation rejects absolute paths, parent segments (`..`), and empty entries.
 
@@ -47,9 +48,21 @@ Why:
 - Keeps write permissions explicit in pipeline definitions.
 
 Tradeoff:
-- Current matching is exact-path only (no globs/directories).
+- Directory allowlists increase flexibility but broaden write scope; critical files should still use exact path entries.
 
-## 5) Tool command guardrails
+## 5) Structured verification plans
+Decision:
+- Add a dedicated `verification` node type that consumes a structured plan from context.
+- Plan contains required file paths and commands to execute.
+- Verification commands are restricted by `verification.allowed_commands` command-prefix allowlist.
+- Persist verification inputs/outputs as artifacts (`verification.plan.json`, `verification.results.json`).
+
+Why:
+- Keeps verification auditable and deterministic while still allowing LLM-authored plans.
+- Separates implementation freedom from deterministic, policy-checked validation execution.
+- Makes behavior-based checks practical even when file layout is flexible.
+
+## 6) Tool command guardrails
 Decision:
 - Reject `tool_command` containing `~`, `..`, or absolute path tokens.
 
@@ -60,7 +73,7 @@ Why:
 Tradeoff:
 - This is not a full shell sandbox; it is a practical baseline filter.
 
-## 6) Retry semantics
+## 7) Retry semantics
 Decision:
 - `max_retries` yields `attempts = max_retries + 1`.
 - If retries are exhausted:
@@ -71,7 +84,7 @@ Why:
 - Captures “best effort” versus “must succeed” behavior explicitly.
 - Keeps retry policy local to node config.
 
-## 7) Event + checkpoint persistence
+## 8) Event + checkpoint persistence
 Decision:
 - Persist both append-only events and stateful checkpoints.
 
@@ -80,7 +93,7 @@ Why:
 - `checkpoint.json` provides minimal resume state.
 - Combined model improves operational clarity.
 
-## 8) Prompt handling and AI backend in v0
+## 9) Prompt handling and AI backend in v0
 Decision:
 - Build and persist `prompt.md`.
 - Keep a pluggable `Agent` interface so codergen execution backend can be swapped.
@@ -90,7 +103,7 @@ Why:
 - Decouples pipeline runtime logic from any one agent provider.
 - Allows real runs through Codex CLI while preserving deterministic test mode.
 
-## 9) Agent permission/sandbox controls
+## 10) Agent permission/sandbox controls
 Decision:
 - Expose Codex controls as config, not hardcoded policy:
   - sandbox mode
@@ -105,7 +118,7 @@ Why:
 - Avoids baking provider-specific policy assumptions into engine code.
 - Leaves room for different agent providers with different control surfaces.
 
-## 10) Exit codes and error classes
+## 11) Exit codes and error classes
 Decision:
 - CLI returns:
   - `1` for normal failures/usage errors.
@@ -114,7 +127,7 @@ Decision:
 Why:
 - Keeps command-line behavior simple while distinguishing severe internal failures.
 
-## 11) Testing philosophy
+## 12) Testing philosophy
 Decision:
 - Use spec-first and test-first development as the default.
 - Prefer autonomous, executable validation (AI-run tests) over manual inspection.

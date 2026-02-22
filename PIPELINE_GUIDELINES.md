@@ -31,6 +31,10 @@ Think of it as a small state machine:
 - Tool node (shell command):
   - `shape=parallelogram` or `type=tool`
   - requires `tool_command="..."`
+- Verification node (deterministic checks from plan):
+  - `type=verification` (usually with `shape=parallelogram`)
+  - reads plan from context key `verification.plan` by default
+  - requires `verification.allowed_commands="prefix1,prefix2,..."`
 - Codergen node (agent-driven):
   - default for `shape=box` (or `type=codergen`)
   - uses `prompt="..."`
@@ -47,6 +51,8 @@ If multiple matching edges exist, highest `weight` wins.
 ## Safety and guardrails
 - Always set `allowed_write_paths` on executable nodes (`box`/`parallelogram`) when possible.
 - `allowed_write_paths` must be comma-separated relative paths.
+- Exact files are allowed by direct entry (example: `main.go`).
+- Directories are allowed by trailing slash (example: `src/` allows `src/a.go`, `src/lib/b.go`, etc.).
 - Absolute paths and `..` are rejected in `allowed_write_paths`.
 - Tool command guardrail rejects:
   - `~`
@@ -116,6 +122,27 @@ generate [
 ];
 ```
 
+## Template: verification plan flow
+```dot
+digraph VerifyPlanFlow {
+  start [shape=Mdiamond];
+  generate [shape=box, prompt="Implement feature and return verification_plan.\n"];
+  verify [shape=parallelogram, type=verification, "verification.allowed_commands"="test -f,go test,go build"];
+  exit [shape=Msquare];
+
+  start -> generate -> verify;
+  verify -> exit [condition="outcome=success"];
+}
+```
+
+Expected generated verification plan shape:
+```json
+{
+  "files": ["path/to/file.go"],
+  "commands": ["go test ./internal/factory"]
+}
+```
+
 ## Common mistakes and fixes
 - Mistake: prompt written as raw multiline quote block
   - Symptom: parse error (`invalid syntax`)
@@ -127,7 +154,15 @@ generate [
 
 - Mistake: broad write scope
   - Symptom: unexpected file mutations
-  - Fix: constrain with `allowed_write_paths`
+  - Fix: constrain with `allowed_write_paths`; prefer exact files for sensitive paths, directory entries only where needed
+
+- Mistake: verification node has no command allowlist
+  - Symptom: verification fails with `verification.allowed_commands is required`
+  - Fix: set explicit command prefixes on the verification node
+
+- Mistake: verification plan missing from context
+  - Symptom: verification fails with `verification plan missing in context key`
+  - Fix: ensure previous node writes `verification_plan` (or `context_updates`) to the configured context key
 
 - Mistake: no exit path for failures
   - Symptom: routing error (`no route from node ...`)

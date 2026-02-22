@@ -271,3 +271,89 @@ func TestResumeDoesNotRerunCompletedNode(t *testing.T) {
 		t.Fatal("expected stage started events")
 	}
 }
+
+func TestGuardAllowlistPermitsDirectoryWrites(t *testing.T) {
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	t [shape=parallelogram, tool_command="sh -c 'mkdir -p out && echo hi > out/a.txt'", allowed_write_paths="out/"];
+	exit [shape=Msquare];
+	start -> t;
+	t -> exit;
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r14"}); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := os.ReadFile(filepath.Join(runsdir, "r14", "t", "status.json"))
+	if strings.Contains(string(st), "guardrail_violation") {
+		t.Fatalf("expected directory allowlist to pass: %s", string(st))
+	}
+}
+
+func TestVerificationNodeFromPlanContext(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	generate [
+		shape=box,
+		"test.verification_plan_json"="{\"files\":[\"main.go\"],\"commands\":[\"test -f main.go\"]}"
+	];
+	verify [
+		shape=parallelogram,
+		type=verification,
+		"verification.allowed_commands"="test -f"
+	];
+	exit [shape=Msquare];
+	start -> generate;
+	generate -> verify;
+	verify -> exit [condition="outcome=success"];
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	writeFile(t, filepath.Join(workdir, "main.go"), "package main\n")
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r15"}); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := os.ReadFile(filepath.Join(runsdir, "r15", "verify", "status.json"))
+	if !strings.Contains(string(st), `"outcome": "success"`) {
+		t.Fatalf("expected verification success: %s", string(st))
+	}
+	if _, err := os.Stat(filepath.Join(runsdir, "r15", "verify", "verification.plan.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(runsdir, "r15", "verify", "verification.results.json")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVerificationNodeRejectsCommandOutsideAllowlist(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	generate [
+		shape=box,
+		"test.verification_plan_json"="{\"files\":[\"main.go\"],\"commands\":[\"echo hi\"]}"
+	];
+	verify [
+		shape=parallelogram,
+		type=verification,
+		"verification.allowed_commands"="go test"
+	];
+	exit [shape=Msquare];
+	start -> generate;
+	generate -> verify;
+	verify -> exit [condition="outcome=success"];
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	writeFile(t, filepath.Join(workdir, "main.go"), "package main\n")
+	err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r16"})
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	if !strings.Contains(err.Error(), "no route from node verify for outcome fail") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	st, _ := os.ReadFile(filepath.Join(runsdir, "r16", "verify", "status.json"))
+	if !strings.Contains(string(st), "command not allowed") {
+		t.Fatalf("expected command allowlist failure: %s", string(st))
+	}
+}

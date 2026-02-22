@@ -125,7 +125,7 @@ const codexOutcomeSchema = `{
   "title": "AttractorCodexOutcome",
   "type": "object",
   "additionalProperties": false,
-  "required": ["outcome", "preferred_next_label", "suggested_next_ids", "context_updates", "notes", "failure_reason"],
+  "required": ["outcome", "preferred_next_label", "suggested_next_ids", "context_updates", "verification_plan", "notes", "failure_reason"],
   "properties": {
     "outcome": {
       "type": "string",
@@ -142,6 +142,26 @@ const codexOutcomeSchema = `{
       "type": "object",
       "properties": {},
       "additionalProperties": false
+    },
+    "verification_plan": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["files", "commands"],
+          "properties": {
+            "files": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "commands": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      ]
     },
     "notes": {
       "type": "string"

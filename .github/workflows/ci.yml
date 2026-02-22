@@ -32,3 +32,9 @@ jobs:
 
       - name: Run tests
         run: go test ./...
+
+      - name: Run smoke test
+        run: bash scripts/smoke.sh
+
+      - name: Run verification smoke test
+        run: bash scripts/smoke_verification.sh

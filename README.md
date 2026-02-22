@@ -106,7 +106,12 @@ Node handler selection:
 - `shape=Mdiamond` or `type=start` -> start handler.
 - `shape=Msquare` or `type=exit` -> exit handler.
 - `shape=parallelogram` or `type=tool` -> tool handler.
+- `type=verification` -> verification handler (deterministic plan-driven checks).
 - default (`shape=box` / unspecified type) -> codergen handler.
+
+`allowed_write_paths` supports:
+- exact file entries (example: `main.go`)
+- directory entries with trailing slash (example: `src/`)
 
 Supported edge conditions:
 - `outcome=success`
@@ -166,6 +171,8 @@ Codex outputs and schema are written per node:
 - `<node>/codex.stdout.log`
 - `<node>/codex.stderr.log`
 - `<node>/response.md` (JSON response mapped to stage outcome)
+
+Codex can also return an optional `verification_plan` object. The engine stores it in context (default key `verification.plan`) so a later `type=verification` node can execute deterministic checks from that plan.
 
 ## Smoke script
 

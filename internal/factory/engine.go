@@ -350,6 +350,8 @@ func resolveHandler(node *Node) Handler {
 		return exitHandler{}
 	case "tool":
 		return toolHandler{}
+	case "verification":
+		return verificationHandler{}
 	default:
 		return codergenHandler{}
 	}
@@ -440,7 +442,20 @@ func (codergenHandler) Execute(node *Node, ctx Context, g *Graph, nodeDir string
 		if writeErr := os.WriteFile(filepath.Join(nodeDir, "response.md"), []byte(resp), 0o644); writeErr != nil {
 			return Outcome{}, writeErr
 		}
-		return Outcome{SchemaVersion: 1, Outcome: outcome, PreferredNextLabel: nextLabel, SuggestedNextIDs: suggest, Notes: notes, ContextUpdates: map[string]any{}}, nil
+		updates := map[string]any{}
+		if raw := strings.TrimSpace(node.StringAttr("test.verification_plan_json", "")); raw != "" {
+			var parsed any
+			if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+				return Outcome{}, fmt.Errorf("invalid test.verification_plan_json: %w", err)
+			}
+			plan, err := ParseVerificationPlan(parsed)
+			if err != nil {
+				return Outcome{}, err
+			}
+			key := strings.TrimSpace(node.StringAttr("verification.plan_context_key", "verification.plan"))
+			updates[key] = VerificationPlanToMap(plan)
+		}
+		return Outcome{SchemaVersion: 1, Outcome: outcome, PreferredNextLabel: nextLabel, SuggestedNextIDs: suggest, Notes: notes, ContextUpdates: updates}, nil
 	}
 	agent, err := ResolveAgent(node, workspace)
 	if err != nil {
@@ -454,6 +469,13 @@ func (codergenHandler) Execute(node *Node, ctx Context, g *Graph, nodeDir string
 	})
 	if err != nil {
 		return Outcome{}, err
+	}
+	if resp.ContextUpdates == nil {
+		resp.ContextUpdates = map[string]any{}
+	}
+	if resp.VerificationPlan != nil {
+		key := strings.TrimSpace(node.StringAttr("verification.plan_context_key", "verification.plan"))
+		resp.ContextUpdates[key] = VerificationPlanToMap(*resp.VerificationPlan)
 	}
 	return Outcome{
 		SchemaVersion:      1,
@@ -583,21 +605,41 @@ func computeDiff(before, after map[string]fileState) workspaceDiff {
 }
 
 func disallowedDiffPaths(d workspaceDiff, allowed []string) []string {
-	set := map[string]bool{}
+	normalized := make([]string, 0, len(allowed))
 	for _, p := range allowed {
-		set[p] = true
+		p = filepath.ToSlash(strings.TrimSpace(p))
+		if p != "" {
+			normalized = append(normalized, p)
+		}
 	}
 	all := append([]string{}, d.Created...)
 	all = append(all, d.Modified...)
 	all = append(all, d.Deleted...)
 	viol := []string{}
 	for _, p := range all {
-		if !set[p] {
+		if !pathAllowed(p, normalized) {
 			viol = append(viol, p)
 		}
 	}
 	sort.Strings(viol)
 	return viol
+}
+
+func pathAllowed(path string, allowed []string) bool {
+	path = filepath.ToSlash(strings.TrimSpace(path))
+	for _, entry := range allowed {
+		if strings.HasSuffix(entry, "/") {
+			dir := strings.TrimSuffix(entry, "/")
+			if path == dir || strings.HasPrefix(path, dir+"/") {
+				return true
+			}
+			continue
+		}
+		if path == entry {
+			return true
+		}
+	}
+	return false
 }
 
 func findStartNode(g *Graph) *Node {

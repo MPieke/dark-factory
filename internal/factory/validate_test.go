@@ -79,3 +79,11 @@ func TestValidateAllowlistPaths(t *testing.T) {
 		t.Fatal("empty allowlist should be valid")
 	}
 }
+
+func TestValidateVerificationType(t *testing.T) {
+	dot := `digraph G { start [shape=Mdiamond]; v [type=verification, shape=parallelogram]; exit [shape=Msquare]; start -> v; v -> exit; }`
+	g, _ := ParseDOT(dot)
+	if HasErrors(ValidateGraph(g)) {
+		t.Fatal("verification type should be valid")
+	}
+}

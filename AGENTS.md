@@ -27,7 +27,27 @@ Use these docs as the primary context before making code changes:
 - Follow `DEVELOPER_GUIDELINES.md` for code structure, module boundaries, and git/PR workflow.
 - Follow `PIPELINE_GUIDELINES.md` when creating or modifying pipeline DOT files.
 - Check `LESSONS_LEARNED.md` before implementing similar flows; reuse known fixes unless requirements changed.
-- Add or update tests in `internal/attractor/*_test.go` for runtime or validation behavior changes.
+- Add or update tests in `internal/factory/*_test.go` for runtime or validation behavior changes.
+
+## Validation gates (required)
+- For all code changes:
+  - run `go test ./...`
+- For runtime changes (engine, handlers, routing, guardrails, agent integration):
+  - run at least one end-to-end CLI execution with `factory run ...`
+  - provide artifact evidence (for example `status.json`, `workspace.diff.json`, verification artifacts)
+- For guardrail/security changes:
+  - include at least one negative end-to-end case proving enforcement on violation
+- Work is incomplete if required end-to-end validation is skipped without explicit reason.
+
+## Validation matrix
+- Parser/model-only changes:
+  - unit tests are required; end-to-end is recommended
+- Validator/routing changes:
+  - unit tests plus at least one end-to-end run are required
+- Engine/handler/guardrail changes:
+  - unit tests plus at least one success and one failure-path end-to-end run are required
+- Agent backend changes:
+  - unit tests plus end-to-end run through the changed backend path are required
 
 ## Memory maintenance rules
 - Treat markdown docs as persistent operational memory. Keep them current in the same PR/commit as code changes.

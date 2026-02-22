@@ -1,7 +1,7 @@
 # Architecture
 
 ## Purpose
-`dark-factory` is a Go CLI (`attractor`) that executes a v0 DAG-like pipeline defined in DOT (`digraph`) and records deterministic run artifacts.
+`dark-factory` is a Go CLI (`factory`) that executes a v0 DAG-like pipeline defined in DOT (`digraph`) and records deterministic run artifacts.
 
 ## High-level flow
 1. CLI parses `run` command args and builds `RunConfig`.
@@ -12,20 +12,24 @@
 6. Engine persists per-stage status, workspace diffs, checkpoints, and event log.
 
 ## Components
-- `cmd/attractor/main.go`
+- `cmd/factory/main.go`
   - CLI entrypoint and argument validation.
-- `internal/attractor/parser.go`
+- `internal/factory/parser.go`
   - DOT parsing, attribute parsing, and primitive value coercion.
-- `internal/attractor/model.go`
+- `internal/factory/model.go`
   - Graph/Node/Edge models and attribute helpers.
-- `internal/attractor/validate.go`
+- `internal/factory/validate.go`
   - Semantic validation (start/exit constraints, supported node/edge types, reachability).
-- `internal/attractor/engine.go`
+- `internal/factory/engine.go`
   - Runtime orchestration, handler dispatch, retries, guardrails, checkpoint/resume, artifacts.
-- `internal/attractor/agent.go`
+- `internal/factory/agent.go`
   - Agent interface and backend resolution.
-- `internal/attractor/agent_codex.go`
+- `internal/factory/agent_codex.go`
   - Codex CLI adapter implementation.
+- `internal/factory/verification.go`
+  - Deterministic verification handler that executes structured verification plans from context.
+- `internal/factory/verification_plan.go`
+  - Verification plan schema/parsing and safe relative-path normalization.
 
 ## Data model
 - Graph:
@@ -47,6 +51,7 @@
   - `start` handler
   - `exit` handler
   - `tool` handler (`parallelogram` / `type=tool`)
+  - `verification` handler (`type=verification`)
   - `codergen` handler (default for executable box nodes)
 
 Stage loop behavior:
@@ -55,6 +60,12 @@ Stage loop behavior:
 - Merge `context_updates` into run context.
 - Write checkpoint.
 - Select next edge based on conditional match (`condition="outcome=..."`), else unconditional; tie-break by highest `weight`.
+
+Verification stage behavior (`type=verification`):
+- Reads a structured verification plan from context (default key: `verification.plan`).
+- Plan includes required files and commands.
+- Enforces per-node command prefix allowlist (`verification.allowed_commands`).
+- Writes `verification.plan.json` and `verification.results.json`.
 
 ## Artifacts
 Per-run directory (`<runsdir>/<run-id>/`):
@@ -67,6 +78,7 @@ Per-run directory (`<runsdir>/<run-id>/`):
   - `workspace.diff.json`
   - `prompt.md` and `response.md` (codergen)
   - `tool.stdout.txt`, `tool.stderr.txt`, `tool.exitcode.txt` (tool)
+  - `verification.plan.json`, `verification.results.json` (verification)
 
 ## Resume model
 - `--resume --run-id <id>` reloads checkpoint and completed node state.
@@ -81,3 +93,4 @@ Per-run directory (`<runsdir>/<run-id>/`):
   - `stub` (default)
   - `codex` (CLI-driven)
 - Codex backend configuration supports sandbox mode, approval policy, working dir, additional dirs, and raw `-c key=value` overrides.
+- Codex responses can optionally include a structured `verification_plan` object; engine stores it in context for verification nodes.
