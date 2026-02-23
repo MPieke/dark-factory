@@ -17,7 +17,7 @@ func main() {
 		}
 	}()
 	if len(os.Args) < 2 || os.Args[1] != "run" {
-		fmt.Fprintln(os.Stderr, "usage: attractor run <pipeline.dot> --workdir <path> --runsdir <path> [--run-id <id>] [--resume]")
+		fmt.Fprintln(os.Stderr, "usage: factory run <pipeline.dot> --workdir <path> --runsdir <path> [--run-id <id>] [--resume]")
 		os.Exit(1)
 	}
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)

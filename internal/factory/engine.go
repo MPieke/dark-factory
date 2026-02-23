@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,15 +67,21 @@ type Engine struct {
 	Context    Context
 	RetryCount map[string]int
 	Completed  map[string]bool
+	Logger     *slog.Logger
 }
 
 func RunPipeline(cfg RunConfig) error {
+	logger := newFactoryLogger()
+	slog.SetDefault(logger)
+	logger.Info("pipeline starting", "pipeline_path", cfg.PipelinePath, "workdir", cfg.Workdir, "runsdir", cfg.Runsdir, "resume", cfg.Resume)
 	b, err := os.ReadFile(cfg.PipelinePath)
 	if err != nil {
+		logger.Error("failed to read pipeline", "error", err)
 		return err
 	}
 	g, err := ParseDOT(string(b))
 	if err != nil {
+		logger.Error("failed to parse pipeline", "error", err)
 		return err
 	}
 	diags := ValidateGraph(g)
@@ -85,11 +92,13 @@ func RunPipeline(cfg RunConfig) error {
 				msgs = append(msgs, d.Message)
 			}
 		}
+		logger.Error("pipeline validation failed", "errors", strings.Join(msgs, "; "))
 		return fmt.Errorf("validation failed: %s", strings.Join(msgs, "; "))
 	}
 
 	if cfg.Resume {
 		if cfg.RunID == "" {
+			logger.Error("resume requested without run-id")
 			return fmt.Errorf("--run-id required with --resume")
 		}
 	} else if cfg.RunID == "" {
@@ -101,9 +110,16 @@ func RunPipeline(cfg RunConfig) error {
 	if cfg.Resume {
 	} else {
 		if err := os.MkdirAll(workspace, 0o755); err != nil {
+			logger.Error("failed to create workspace", "workspace", workspace, "error", err)
 			return err
 		}
-		if err := copyDir(cfg.Workdir, workspace); err != nil {
+		excludes := []string{".git"}
+		if relRuns, ok := relativeDescendant(cfg.Workdir, cfg.Runsdir); ok {
+			excludes = append(excludes, relRuns)
+			logger.Info("excluding runsdir from workspace copy", "relative_path", relRuns)
+		}
+		if err := copyDir(cfg.Workdir, workspace, excludes); err != nil {
+			logger.Error("failed to copy workdir into workspace", "error", err)
 			return err
 		}
 	}
@@ -114,6 +130,7 @@ func RunPipeline(cfg RunConfig) error {
 		return err
 	}
 	if err := writeManifest(g, cfg, runDir, workspace); err != nil {
+		logger.Error("failed to write manifest", "error", err)
 		return err
 	}
 	_ = appendTrace(runDir, "SessionInitialized", map[string]any{
@@ -124,7 +141,7 @@ func RunPipeline(cfg RunConfig) error {
 		"resume":        cfg.Resume,
 	})
 
-	e := &Engine{Graph: g, RunID: cfg.RunID, RunDir: runDir, Workspace: workspace, Context: Context{}, RetryCount: map[string]int{}, Completed: map[string]bool{}}
+	e := &Engine{Graph: g, RunID: cfg.RunID, RunDir: runDir, Workspace: workspace, Context: Context{}, RetryCount: map[string]int{}, Completed: map[string]bool{}, Logger: logger}
 	if goal, ok := g.Attrs["goal"]; ok {
 		e.Context["graph.goal"] = goal
 	}
@@ -162,13 +179,16 @@ func RunPipeline(cfg RunConfig) error {
 
 	_ = appendEvent(runDir, map[string]any{"schema_version": 1, "type": "PipelineStarted", "run_id": cfg.RunID, "at": time.Now().UTC().Format(time.RFC3339Nano)})
 	_ = appendTrace(runDir, "PipelineStarted", map[string]any{"run_id": cfg.RunID, "start_node": startID})
+	logger.Info("pipeline execution started", "run_id", cfg.RunID, "run_dir", runDir, "workspace", workspace, "start_node", startID)
 	if err := e.executeFrom(startID); err != nil {
 		_ = appendEvent(runDir, map[string]any{"schema_version": 1, "type": "PipelineFailed", "error": err.Error(), "at": time.Now().UTC().Format(time.RFC3339Nano)})
 		_ = appendTrace(runDir, "PipelineFailed", map[string]any{"error": err.Error()})
+		logger.Error("pipeline failed", "run_id", cfg.RunID, "error", err)
 		return err
 	}
 	_ = appendEvent(runDir, map[string]any{"schema_version": 1, "type": "PipelineCompleted", "at": time.Now().UTC().Format(time.RFC3339Nano)})
 	_ = appendTrace(runDir, "PipelineCompleted", map[string]any{})
+	logger.Info("pipeline completed", "run_id", cfg.RunID)
 	return nil
 }
 
@@ -184,6 +204,7 @@ func (e *Engine) executeFrom(startID string) error {
 			return err
 		}
 		_ = appendEvent(e.RunDir, map[string]any{"schema_version": 1, "type": "StageStarted", "node_id": node.ID, "at": time.Now().UTC().Format(time.RFC3339Nano)})
+		e.Logger.Info("stage started", "node", node.ID, "type", node.Type(), "shape", node.Shape())
 		contextBefore := cloneContext(e.Context)
 		_ = appendTrace(e.RunDir, "NodeInputCaptured", map[string]any{
 			"node_id":           node.ID,
@@ -199,6 +220,7 @@ func (e *Engine) executeFrom(startID string) error {
 		if err != nil {
 			_ = appendEvent(e.RunDir, map[string]any{"schema_version": 1, "type": "StageFailed", "node_id": node.ID, "error": err.Error(), "at": time.Now().UTC().Format(time.RFC3339Nano)})
 			_ = appendTrace(e.RunDir, "NodeExecutionErrored", map[string]any{"node_id": node.ID, "error": err.Error()})
+			e.Logger.Error("stage execution errored", "node", node.ID, "error", err)
 			return err
 		}
 		if err := writeJSON(filepath.Join(nodeDir, "status.json"), out); err != nil {
@@ -206,8 +228,10 @@ func (e *Engine) executeFrom(startID string) error {
 		}
 		if out.Outcome == "fail" {
 			_ = appendEvent(e.RunDir, map[string]any{"schema_version": 1, "type": "StageFailed", "node_id": node.ID, "failure_reason": out.FailureReason, "at": time.Now().UTC().Format(time.RFC3339Nano)})
+			e.Logger.Warn("stage failed", "node", node.ID, "reason", out.FailureReason)
 		} else {
 			_ = appendEvent(e.RunDir, map[string]any{"schema_version": 1, "type": "StageCompleted", "node_id": node.ID, "outcome": out.Outcome, "at": time.Now().UTC().Format(time.RFC3339Nano)})
+			e.Logger.Info("stage completed", "node", node.ID, "outcome", out.Outcome)
 		}
 		for k, v := range out.ContextUpdates {
 			e.Context[k] = v
@@ -240,6 +264,7 @@ func (e *Engine) executeFrom(startID string) error {
 			"next_node":  next,
 			"candidates": routeCandidates(e.Graph, node.ID, out.Outcome),
 		})
+		e.Logger.Info("route selected", "from_node", node.ID, "outcome", out.Outcome, "next_node", next)
 		if next == "" {
 			return fmt.Errorf("no route from node %s for outcome %s", node.ID, out.Outcome)
 		}
@@ -254,6 +279,7 @@ func (e *Engine) executeNode(node *Node, nodeDir string) (Outcome, error) {
 	attempts := maxRetries + 1
 	var out Outcome
 	for attempt := 0; attempt < attempts; attempt++ {
+		e.Logger.Debug("node attempt", "node", node.ID, "attempt", attempt+1, "max_attempts", attempts)
 		before, err := snapshotWorkspace(e.Workspace)
 		if err != nil {
 			return Outcome{}, err
@@ -305,6 +331,7 @@ func (e *Engine) executeNode(node *Node, nodeDir string) (Outcome, error) {
 			e.RetryCount[node.ID] = e.RetryCount[node.ID] + 1
 			e.Context["internal.retry_count."+node.ID] = e.RetryCount[node.ID]
 			_ = appendEvent(e.RunDir, map[string]any{"schema_version": 1, "type": "StageRetrying", "node_id": node.ID, "retry_count": e.RetryCount[node.ID], "at": time.Now().UTC().Format(time.RFC3339Nano)})
+			e.Logger.Warn("stage requested retry", "node", node.ID, "retry_count", e.RetryCount[node.ID])
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
@@ -507,6 +534,7 @@ func (codergenHandler) Execute(node *Node, ctx Context, g *Graph, nodeDir string
 		NodeID:    node.ID,
 		NodeDir:   nodeDir,
 		Workspace: workspace,
+		Logger:    slog.Default(),
 	})
 	if err != nil {
 		return Outcome{}, err
@@ -846,7 +874,16 @@ func readStatus(path string) (Outcome, error) {
 	return out, err
 }
 
-func copyDir(src, dst string) error {
+func copyDir(src, dst string, excludes []string) error {
+	normExcludes := make([]string, 0, len(excludes))
+	for _, ex := range excludes {
+		ex = strings.TrimSpace(ex)
+		if ex == "" || ex == "." {
+			continue
+		}
+		ex = filepath.ToSlash(filepath.Clean(ex))
+		normExcludes = append(normExcludes, ex)
+	}
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -858,7 +895,8 @@ func copyDir(src, dst string) error {
 		if rel == "." {
 			return nil
 		}
-		if strings.HasPrefix(rel, ".git") {
+		rel = filepath.ToSlash(rel)
+		if shouldSkipCopyRel(rel, normExcludes) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -874,4 +912,27 @@ func copyDir(src, dst string) error {
 		}
 		return os.WriteFile(target, b, 0o644)
 	})
+}
+
+func shouldSkipCopyRel(rel string, excludes []string) bool {
+	for _, ex := range excludes {
+		if rel == ex || strings.HasPrefix(rel, ex+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func relativeDescendant(parent, child string) (string, bool) {
+	parent = filepath.Clean(parent)
+	child = filepath.Clean(child)
+	rel, err := filepath.Rel(parent, child)
+	if err != nil || rel == "." {
+		return "", false
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", false
+	}
+	return rel, true
 }

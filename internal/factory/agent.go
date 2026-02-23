@@ -2,8 +2,10 @@ package attractor
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -12,6 +14,7 @@ type AgentRequest struct {
 	NodeID    string
 	NodeDir   string
 	Workspace string
+	Logger    *slog.Logger
 }
 
 type AgentResponse struct {
@@ -35,6 +38,8 @@ type CodexOptions struct {
 	AddDirs              []string
 	Model                string
 	Profile              string
+	TimeoutSeconds       int
+	HeartbeatSeconds     int
 	ConfigOverrides      []string
 	AutoApproveCommands  []string
 	AutoApproveConfigKey string
@@ -91,6 +96,12 @@ func codexOptionsFromNodeAndEnv(node *Node, workspace string) (CodexOptions, err
 		Workdir:        pickString(node.StringAttr("codex.workdir", ""), os.Getenv("ATTRACTOR_CODEX_WORKDIR"), ""),
 		Model:          pickString(node.StringAttr("codex.model", ""), os.Getenv("ATTRACTOR_CODEX_MODEL"), ""),
 		Profile:        pickString(node.StringAttr("codex.profile", ""), os.Getenv("ATTRACTOR_CODEX_PROFILE"), ""),
+		TimeoutSeconds: pickInt(node.IntAttr("codex.timeout_seconds", 0), parseIntEnv("ATTRACTOR_CODEX_TIMEOUT_SECONDS"), 0),
+		HeartbeatSeconds: pickInt(
+			node.IntAttr("codex.heartbeat_seconds", 0),
+			parseIntEnv("ATTRACTOR_CODEX_HEARTBEAT_SECONDS"),
+			15,
+		),
 	}
 	opts.DangerousBypass = node.BoolAttr("codex.dangerous_bypass", false) || parseBoolEnv("ATTRACTOR_CODEX_DANGEROUS_BYPASS")
 	opts.SkipGitRepoCheck = node.BoolAttr("codex.skip_git_repo_check", false) || parseBoolEnv("ATTRACTOR_CODEX_SKIP_GIT_REPO_CHECK")
@@ -114,6 +125,16 @@ func codexOptionsFromNodeAndEnv(node *Node, workspace string) (CodexOptions, err
 	}
 	opts.AddDirs = resolved
 	return opts, nil
+}
+
+func pickInt(primary, secondary, def int) int {
+	if primary > 0 {
+		return primary
+	}
+	if secondary > 0 {
+		return secondary
+	}
+	return def
 }
 
 func pickString(primary, secondary, def string) string {
@@ -157,6 +178,18 @@ func pickConfigOverrides(primary, secondary string) []string {
 func parseBoolEnv(key string) bool {
 	v := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
 	return v == "1" || v == "true" || v == "yes"
+}
+
+func parseIntEnv(key string) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func resolveDir(workspace, p string) (string, error) {

@@ -190,6 +190,25 @@ func TestGuardWorkspaceCreatedAndUsed(t *testing.T) {
 	}
 }
 
+func TestWorkspaceCopyExcludesNestedRunsDir(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G { start [shape=Mdiamond]; a [shape=box]; exit [shape=Msquare]; start -> a; a -> exit; }`
+	workdir, _, pipeline := setupRun(t, dot)
+	runsdir := filepath.Join(workdir, ".runs")
+	writeFile(t, filepath.Join(workdir, "seed.txt"), "hello")
+
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "rin"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(runsdir, "rin", "workspace", "seed.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(runsdir, "rin", "workspace", ".runs")); err == nil {
+		t.Fatal("workspace should not contain nested .runs copy")
+	}
+}
+
 func TestGuardAllowlistPermitsSpecificWrites(t *testing.T) {
 	dot := `digraph G { start [shape=Mdiamond]; t [shape=parallelogram, tool_command="sh -c 'echo hi > a.txt'", allowed_write_paths="a.txt"]; exit [shape=Msquare]; start -> t; t -> exit; }`
 	workdir, runsdir, pipeline := setupRun(t, dot)
