@@ -23,10 +23,12 @@
   - Semantic validation (start/exit constraints, supported node/edge types, reachability).
 - `internal/factory/engine.go`
   - Runtime orchestration, handler dispatch, retries, guardrails, checkpoint/resume, artifacts.
+- `internal/factory/logging.go`
+  - Structured runtime logger (`slog`) with env-configurable level/format.
 - `internal/factory/agent.go`
   - Agent interface and backend resolution.
 - `internal/factory/agent_codex.go`
-  - Codex CLI adapter implementation.
+  - Codex CLI adapter implementation, timeout/heartbeat behavior, and live stream capture.
 - `internal/factory/verification.go`
   - Deterministic verification handler that executes structured verification plans from context.
 - `internal/factory/verification_plan.go`
@@ -79,6 +81,7 @@ Per-run directory (`<runsdir>/<run-id>/`):
   - `status.json`
   - `workspace.diff.json`
   - `prompt.md` and `response.md` (codergen)
+  - `codex.args.txt`, `codex.stdout.log`, `codex.stderr.log` (codex backend)
   - `tool.stdout.txt`, `tool.stderr.txt`, `tool.exitcode.txt` (tool)
   - `verification.plan.json`, `verification.results.json` (verification)
 
@@ -102,4 +105,15 @@ Per-run directory (`<runsdir>/<run-id>/`):
   - `stub` (default)
   - `codex` (CLI-driven)
 - Codex backend configuration supports sandbox mode, approval policy, working dir, additional dirs, and raw `-c key=value` overrides.
+- Codex backend supports execution controls:
+  - `codex.timeout_seconds` / `ATTRACTOR_CODEX_TIMEOUT_SECONDS`
+  - `codex.heartbeat_seconds` / `ATTRACTOR_CODEX_HEARTBEAT_SECONDS`
+- Codex stream visibility:
+  - `FACTORY_LOG_CODEX_STREAM=1` enables live stdout/stderr line logging to the factory logger.
+  - stdout/stderr are also written incrementally to per-node files while the process is running.
 - Codex responses can optionally include a structured `verification_plan` object; engine stores it in context for verification nodes.
+
+## Workspace copy rules
+- Run workspace is copied from `--workdir` into `<runsdir>/<run-id>/workspace`.
+- Engine excludes `.git` during copy.
+- If `--runsdir` is nested under `--workdir` (for example `workdir/.runs`), the nested runs path is automatically excluded from copy to prevent recursive self-copy loops.

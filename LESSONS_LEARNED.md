@@ -100,3 +100,41 @@ This file records concrete failure modes seen in this repo and the fixes applied
   - Added per-run `trace.jsonl` with typed records (`NodeInputCaptured`, `NodeOutputCaptured`, `RouteEvaluated`, etc.).
 - Prevention:
   - For future runtime changes, include trace record updates and tests proving trace coverage.
+
+## 11) Agent stage appeared stalled with no visible progress
+- Symptom:
+  - Pipeline logs stopped at `stage started` for a Codex node with only periodic manual interruption.
+  - No immediate visibility into what Codex was doing.
+- Root cause:
+  - Codex execution was previously awaited as a single blocking call with no lifecycle logging, no heartbeat, and no live stream surfacing.
+- Fix:
+  - Added structured Codex lifecycle logs:
+    - `codex exec started`
+    - `codex exec still running` (heartbeat)
+    - `codex exec completed` / `codex exec failed` / `codex exec timed out`
+  - Added timeout controls:
+    - node attr `codex.timeout_seconds`
+    - env `ATTRACTOR_CODEX_TIMEOUT_SECONDS`
+  - Added heartbeat controls:
+    - node attr `codex.heartbeat_seconds`
+    - env `ATTRACTOR_CODEX_HEARTBEAT_SECONDS`
+  - Added live stream option:
+    - `FACTORY_LOG_CODEX_STREAM=1`
+  - Added persistent run artifacts:
+    - `<node>/codex.args.txt`
+    - incremental `<node>/codex.stdout.log` and `<node>/codex.stderr.log`
+- Prevention (test/check/guardrail):
+  - For agent backend changes, require end-to-end execution that verifies node lifecycle logs and presence of codex artifact files.
+  - Avoid interrupting runs before timeout/exit when diagnosing backend behavior.
+
+## 12) Recursive workspace copy when `runsdir` is under `workdir`
+- Symptom:
+  - Run failed during workspace preparation with repeated nested `.runs/.../workspace` path growth and `file name too long`.
+- Root cause:
+  - Workspace copy included `runsdir` when `runsdir` was inside `workdir`, causing recursive self-copy.
+- Fix:
+  - Copy step now auto-excludes nested runsdir relative path when `runsdir` is a descendant of `workdir`.
+  - Added regression test `TestWorkspaceCopyExcludesNestedRunsDir`.
+- Prevention (test/check/guardrail):
+  - Keep using `go test ./...` as commit gate for engine changes.
+  - Prefer external runs directory in local usage, but nested runsdir is now safe.

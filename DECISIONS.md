@@ -27,6 +27,7 @@ Why:
 ## 3) Workspace isolation by copy
 Decision:
 - Each run gets its own `workspace/` copied from `--workdir`.
+- If `--runsdir` is inside `--workdir`, exclude that nested path from copy.
 
 Why:
 - Avoids mutating source state directly.
@@ -35,6 +36,7 @@ Why:
 
 Tradeoff:
 - Copying can be slower for large repos.
+- Nested runsdir exclusion avoids recursive copy explosions but requires path normalization logic in copy step.
 
 ## 4) File write guardrails (`allowed_write_paths`)
 Decision:
@@ -120,7 +122,19 @@ Why:
 - Avoids baking provider-specific policy assumptions into engine code.
 - Leaves room for different agent providers with different control surfaces.
 
-## 11) Exit codes and error classes
+## 11) Runtime observability as first-class behavior
+Decision:
+- Use structured logs for pipeline and stage lifecycle.
+- Add Codex execution lifecycle logs (start, heartbeat, completion/failure/timeout).
+- Persist Codex invocation details (`codex.args.txt`) and stream output logs.
+- Support opt-in live stream logging with `FACTORY_LOG_CODEX_STREAM=1`.
+
+Why:
+- Removes blind spots where long-running agent nodes appear idle.
+- Makes hangs/timeouts diagnosable without manual postmortem guesswork.
+- Keeps default noise reasonable while allowing high-visibility debugging when needed.
+
+## 12) Exit codes and error classes
 Decision:
 - CLI returns:
   - `1` for normal failures/usage errors.
@@ -129,7 +143,7 @@ Decision:
 Why:
 - Keeps command-line behavior simple while distinguishing severe internal failures.
 
-## 12) Testing philosophy
+## 13) Testing philosophy
 Decision:
 - Use spec-first and test-first development as the default.
 - Prefer autonomous, executable validation (AI-run tests) over manual inspection.

@@ -13,11 +13,11 @@ At a high level, it:
 
 ## What this repo contains
 
-- `cmd/attractor/main.go`: CLI entrypoint.
-- `internal/attractor/parser.go`: DOT parser.
-- `internal/attractor/validate.go`: graph validation and guardrails.
-- `internal/attractor/engine.go`: run engine, handlers, artifacts, resume logic.
-- `internal/attractor/*_test.go`: unit tests.
+- `cmd/factory/main.go`: CLI entrypoint.
+- `internal/factory/parser.go`: DOT parser.
+- `internal/factory/validate.go`: graph validation and guardrails.
+- `internal/factory/engine.go`: run engine, handlers, artifacts, resume logic.
+- `internal/factory/*_test.go`: unit tests.
 - `scripts/smoke.sh`: end-to-end smoke script.
 
 ## How to use
@@ -77,7 +77,7 @@ digraph G {
 ## 4) Run a pipeline
 
 ```bash
-./bin/factory run pipeline.dot --workdir . --runsdir ./runs --run-id demo
+./bin/factory run --workdir . --runsdir ./runs --run-id demo pipeline.dot
 ```
 
 Required flags:
@@ -139,7 +139,7 @@ ATTRACTION_BACKEND=fake ./bin/factory run pipeline.dot --workdir . --runsdir ./r
 Enable it:
 
 ```bash
-ATTRACTOR_AGENT_BACKEND=codex ./bin/factory run pipeline.dot --workdir . --runsdir ./runs --run-id codex-demo
+ATTRACTOR_AGENT_BACKEND=codex ./bin/factory run --workdir . --runsdir ./runs --run-id codex-demo pipeline.dot
 ```
 
 You can configure Codex at node level (`codex.*` attrs) or via env vars:
@@ -166,12 +166,26 @@ You can configure Codex at node level (`codex.*` attrs) or via env vars:
 - Optional model/profile:
   - attr: `codex.model`, `codex.profile`
   - env: `ATTRACTOR_CODEX_MODEL`, `ATTRACTOR_CODEX_PROFILE`
+- Optional timeout/heartbeat:
+  - attr: `codex.timeout_seconds`, `codex.heartbeat_seconds`
+  - env: `ATTRACTOR_CODEX_TIMEOUT_SECONDS`, `ATTRACTOR_CODEX_HEARTBEAT_SECONDS`
+
+Runtime logging controls:
+- `FACTORY_LOG_LEVEL=debug|info|warn|error`
+- `FACTORY_LOG_FORMAT=text|json`
+- `FACTORY_LOG_CODEX_STREAM=1` (optional live stdout/stderr stream lines)
 
 Codex outputs and schema are written per node:
 - `<node>/codex.output.schema.json`
+- `<node>/codex.args.txt`
 - `<node>/codex.stdout.log`
 - `<node>/codex.stderr.log`
 - `<node>/response.md` (JSON response mapped to stage outcome)
+
+Notes:
+- `codex.stdout.log` and `codex.stderr.log` are written incrementally while the node runs.
+- If `--runsdir` is under `--workdir` (for example `--runsdir ./.runs`), factory excludes that nested path from workspace copy to avoid recursive copy loops.
+- The generated agent CLI in examples reads API keys from process environment (`os.Getenv`) and does not auto-load `.env`.
 
 Codex can also return an optional `verification_plan` object. The engine stores it in context (default key `verification.plan`) so a later `type=verification` node can execute deterministic checks from that plan.
 
