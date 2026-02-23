@@ -165,3 +165,30 @@ Why:
 - Reduces reward-hacking pressure and ambiguous interpretation.
 - Increases reproducibility and confidence in behavior changes.
 - Keeps delivery loop fast while maintaining safety constraints.
+
+## 15) Holdout scenario isolation for Codex nodes
+Decision:
+- Apply a runtime read-isolation safeguard in the Codex backend:
+  - default blocked read path: `scripts/scenarios/`
+  - blocked paths are physically hidden from workspace before Codex execution and restored after execution
+- Keep node-level scoping (`codex.workdir`, `codex.add_dirs`) for least-privilege context.
+- Allow explicit opt-out only when intentional:
+  - `codex.allow_read_scenarios=true`
+  - optional custom blocked list via `codex.block_read_paths` / `ATTRACTOR_CODEX_BLOCK_READ_PATHS`
+
+Why:
+- Keeps user scenario scripts as external validation criteria instead of in-model hints.
+- Reduces reward hacking by preventing direct scenario overfitting.
+- Enforces isolation at runtime rather than relying only on prompt policy.
+
+Tradeoff:
+- Agent nodes have less context and may need more fix iterations for scenario-derived failures.
+
+## 16) Go cache writes must stay inside allowed write scope
+Decision:
+- Agent prompts now require `GOCACHE="$PWD/.gocache"` while running from `agent/`.
+- Keep `allowed_write_paths="agent/"` rather than broadening to workspace-level cache paths.
+
+Why:
+- Prevents guardrail false failures caused by cache writes under workspace root (`.gocache/...`).
+- Preserves tight write boundaries without weakening policy.

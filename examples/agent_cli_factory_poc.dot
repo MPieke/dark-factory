@@ -3,23 +3,32 @@ digraph AgentCliFactoryPOC {
 
   start [shape=Mdiamond];
   exit [shape=Msquare];
+  exit_config_fail [shape=Msquare];
+
+  preflight_live_deps [
+    shape=parallelogram,
+    type=tool,
+    tool_command="bash scripts/scenarios/preflight_provider_live.sh"
+  ];
 
   implement [
     shape=box,
     agent.backend="codex",
     codex.sandbox="workspace-write",
     codex.approval="never",
+    codex.workdir="agent",
+    codex.add_dirs="examples/specs",
     codex.timeout_seconds=900,
     codex.heartbeat_seconds=15,
     codex.skip_git_repo_check=true,
     allowed_write_paths="agent/",
-    prompt="Read examples/specs/agent_cli_poc_spec.md.\n\nImplement the CLI in agent/.\n\nRules:\n- Only modify agent/\n- Do not modify scripts/scenarios/\n- Return strict JSON and include verification_plan.\n\nRun local checks before finishing."
+    prompt="Read ../examples/specs/agent_cli_poc_spec.md.\n\nImplement the CLI in this directory (agent/).\n\nRules:\n- Only modify files in this directory\n- Do not read or rely on scenario scripts\n- Return strict JSON and include verification_plan.\n\nRun local checks before finishing.\nUse GOCACHE=\"$PWD/.gocache\" for go commands."
   ];
 
   verify_plan [
     shape=parallelogram,
     type=verification,
-    "verification.allowed_commands"="bash scripts/scenarios/agent_cli_component_checks.sh,bash scripts/scenarios/agent_cli_user_scenarios.sh,bash scripts/scenarios/preflight_scenario.sh"
+    "verification.allowed_commands"="bash scripts/scenarios/agent_cli_component_checks.sh,bash scripts/scenarios/agent_cli_user_scenarios.sh,bash scripts/scenarios/preflight_scenario.sh,bash scripts/scenarios/preflight_provider_live.sh"
   ];
 
   validate_component [
@@ -39,14 +48,19 @@ digraph AgentCliFactoryPOC {
     agent.backend="codex",
     codex.sandbox="workspace-write",
     codex.approval="never",
+    codex.workdir="agent",
+    codex.add_dirs="examples/specs",
     codex.timeout_seconds=900,
     codex.heartbeat_seconds=15,
     codex.skip_git_repo_check=true,
     allowed_write_paths="agent/",
-    prompt="Validation failed.\n\nFix agent/ so all validations pass.\nRead spec and scenario scripts.\nReturn strict JSON and include verification_plan."
+    prompt="Validation failed.\n\nFix this directory (agent/) so validations pass.\nRead ../examples/specs/agent_cli_poc_spec.md.\nDo not read or rely on scenario scripts.\nReturn strict JSON and include verification_plan.\nUse GOCACHE=\"$PWD/.gocache\" for go commands."
   ];
 
-  start -> implement;
+  start -> preflight_live_deps;
+  preflight_live_deps -> implement [condition="outcome=success"];
+  preflight_live_deps -> exit_config_fail [condition="outcome=fail"];
+
   implement -> verify_plan [condition="outcome=success"];
   implement -> fix [condition="outcome=fail"];
 

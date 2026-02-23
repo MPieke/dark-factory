@@ -36,6 +36,7 @@ type CodexOptions struct {
 	ApprovalPolicy       string
 	Workdir              string
 	AddDirs              []string
+	BlockReadPaths       []string
 	Model                string
 	Profile              string
 	TimeoutSeconds       int
@@ -109,6 +110,17 @@ func codexOptionsFromNodeAndEnv(node *Node, workspace string) (CodexOptions, err
 	opts.ConfigOverrides = pickConfigOverrides(node.StringAttr("codex.config_overrides", ""), os.Getenv("ATTRACTOR_CODEX_CONFIG_OVERRIDES"))
 	opts.AutoApproveCommands = pickList(node.StringAttr("codex.auto_approve_commands", ""), os.Getenv("ATTRACTOR_CODEX_AUTO_APPROVE_COMMANDS"))
 	opts.AutoApproveConfigKey = pickString(node.StringAttr("codex.auto_approve_config_key", ""), os.Getenv("ATTRACTOR_CODEX_AUTO_APPROVE_CONFIG_KEY"), "")
+	defaultBlockedReadPaths := []string{}
+	if !node.BoolAttr("codex.allow_read_scenarios", false) {
+		defaultBlockedReadPaths = append(defaultBlockedReadPaths, "scripts/scenarios/")
+	}
+	customBlockedReadPaths := pickList(node.StringAttr("codex.block_read_paths", ""), os.Getenv("ATTRACTOR_CODEX_BLOCK_READ_PATHS"))
+	blockedReadPaths := append(defaultBlockedReadPaths, customBlockedReadPaths...)
+	validatedBlocked, err := validateRelativePaths(blockedReadPaths)
+	if err != nil {
+		return CodexOptions{}, err
+	}
+	opts.BlockReadPaths = validatedBlocked
 
 	wd, err := resolveDir(workspace, opts.Workdir)
 	if err != nil {
@@ -125,6 +137,34 @@ func codexOptionsFromNodeAndEnv(node *Node, workspace string) (CodexOptions, err
 	}
 	opts.AddDirs = resolved
 	return opts, nil
+}
+
+func validateRelativePaths(paths []string) ([]string, error) {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(filepath.ToSlash(p))
+		if p == "" {
+			continue
+		}
+		if strings.HasPrefix(p, "/") {
+			return nil, fmt.Errorf("path %q must be relative", p)
+		}
+		clean := filepath.ToSlash(filepath.Clean(p))
+		for _, seg := range strings.Split(clean, "/") {
+			if seg == ".." {
+				return nil, fmt.Errorf("path %q contains parent segment", p)
+			}
+		}
+		if strings.HasSuffix(p, "/") && !strings.HasSuffix(clean, "/") {
+			clean += "/"
+		}
+		if !seen[clean] {
+			seen[clean] = true
+			out = append(out, clean)
+		}
+	}
+	return out, nil
 }
 
 func pickInt(primary, secondary, def int) int {

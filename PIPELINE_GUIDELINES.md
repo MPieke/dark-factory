@@ -60,7 +60,31 @@ If multiple matching edges exist, highest `weight` wins.
   - absolute path tokens
 
 Practical implication:
-- In v0, prefer `go build .` over `go build ./...` because `./...` triggers the `..` guardrail check.
+- Parent-directory path escapes are blocked (for example `../secret`), but normal Go patterns like `./...` are allowed.
+
+## Scenario isolation (recommended)
+- If scenario scripts are meant to be holdout validators, do not expose them to agent nodes.
+- Codex backend also enforces this by default by hiding `scripts/scenarios/` during agent execution.
+- For Codex-backed nodes:
+  - set `codex.workdir` to the app directory (example: `agent`)
+  - set `codex.add_dirs` only for required read context (example: `examples/specs`)
+  - keep scenario scripts executed only by tool/verification nodes
+- Keep prompts aligned with this policy (avoid "read scenario scripts" instructions).
+- Only opt out intentionally:
+  - `codex.allow_read_scenarios=true`
+  - or custom blocked paths with `codex.block_read_paths`.
+
+Example:
+```dot
+implement [
+  shape=box,
+  agent.backend="codex",
+  codex.workdir="agent",
+  codex.add_dirs="examples/specs",
+  allowed_write_paths="agent/",
+  prompt="Read ../examples/specs/my_spec.md.\nDo not read scenario scripts.\nUse GOCACHE=\"$PWD/.gocache\" for go commands.\n"
+];
+```
 
 ## Prompt formatting rules
 - Use one quoted string for `prompt`.

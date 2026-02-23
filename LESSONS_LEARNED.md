@@ -154,3 +154,33 @@ This file records concrete failure modes seen in this repo and the fixes applied
   - Run selftest first to detect scenario bugs early.
   - Classify live failures as external/config issues when code checks already pass.
   - Parameterize live model IDs via env vars to avoid hardcoded unavailable models.
+
+## 14) Agent overfit risk when scenario scripts are visible
+- Symptom:
+  - Codex nodes read and executed `scripts/scenarios/agent_cli_user_scenarios.sh` directly, so holdout behavior checks were effectively visible to the builder agent.
+- Root cause:
+  - Codex ran with workspace root as CWD and unrestricted workspace visibility for reads.
+  - Prompts explicitly told the agent to read scenario scripts.
+- Fix:
+  - Added Codex runtime read-isolation:
+    - default hidden path `scripts/scenarios/` during Codex execution
+    - optional overrides via `codex.block_read_paths` / `ATTRACTOR_CODEX_BLOCK_READ_PATHS`
+    - opt-out via `codex.allow_read_scenarios=true`
+  - Updated pipeline node config to:
+    - `codex.workdir="agent"`
+    - `codex.add_dirs="examples/specs"`
+  - Updated prompts to use only spec input and explicitly avoid scenario scripts.
+- Prevention (test/check/guardrail):
+  - Treat scenario scripts as external validators, not implementation context.
+  - For any new pipeline, set minimal Codex visibility (`workdir` + explicit `add_dirs`) before running long fix loops.
+
+## 15) Guardrail failures caused by Go cache placement
+- Symptom:
+  - `implement` stage failed with `guardrail_violation` listing thousands of `.gocache/...` files.
+- Root cause:
+  - Codex executed Go commands from workspace root with `GOCACHE="$PWD/.gocache"`, creating cache outside `allowed_write_paths="agent/"`.
+- Fix:
+  - Run Codex from `agent/` and require `GOCACHE="$PWD/.gocache"` in agent prompts so cache stays under `agent/.gocache`.
+- Prevention (test/check/guardrail):
+  - Keep cache/temp outputs within explicitly allowed directories.
+  - Prefer tightening execution directory over broadening `allowed_write_paths`.

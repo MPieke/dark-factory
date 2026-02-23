@@ -101,3 +101,46 @@ func TestBuildCodexExecArgsAutoApproveNeedsKey(t *testing.T) {
 		t.Fatal("expected error when auto approve key missing")
 	}
 }
+
+func TestCodexOptionsDefaultBlockedReadPaths(t *testing.T) {
+	t.Setenv("ATTRACTOR_CODEX_BLOCK_READ_PATHS", "")
+	workspace := t.TempDir()
+	n := &Node{ID: "a", Attrs: map[string]Value{}}
+	opts, err := codexOptionsFromNodeAndEnv(n, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts.BlockReadPaths) != 1 || opts.BlockReadPaths[0] != "scripts/scenarios/" {
+		t.Fatalf("unexpected blocked read paths: %+v", opts.BlockReadPaths)
+	}
+}
+
+func TestCodexOptionsAllowReadScenariosDisablesDefaultBlock(t *testing.T) {
+	workspace := t.TempDir()
+	n := &Node{
+		ID: "a",
+		Attrs: map[string]Value{
+			"codex.allow_read_scenarios": true,
+		},
+	}
+	opts, err := codexOptionsFromNodeAndEnv(n, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts.BlockReadPaths) != 0 {
+		t.Fatalf("expected no blocked read paths, got %+v", opts.BlockReadPaths)
+	}
+}
+
+func TestCodexOptionsRejectInvalidBlockedReadPath(t *testing.T) {
+	workspace := t.TempDir()
+	n := &Node{
+		ID: "a",
+		Attrs: map[string]Value{
+			"codex.block_read_paths": "../secret",
+		},
+	}
+	if _, err := codexOptionsFromNodeAndEnv(n, workspace); err == nil {
+		t.Fatal("expected invalid blocked read path error")
+	}
+}

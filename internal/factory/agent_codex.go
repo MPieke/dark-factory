@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,6 +43,15 @@ func (a codexAgent) Run(req AgentRequest) (AgentResponse, error) {
 	if err := os.WriteFile(argsPath, []byte(strings.Join(append([]string{"codex"}, args...), " ")+"\n"), 0o644); err != nil {
 		return AgentResponse{}, err
 	}
+	hiddenPaths, err := hideWorkspacePaths(req.Workspace, req.NodeDir, a.opts.BlockReadPaths)
+	if err != nil {
+		return AgentResponse{}, err
+	}
+	defer func() {
+		if restoreErr := restoreWorkspacePaths(hiddenPaths); restoreErr != nil {
+			logger.Error("failed to restore hidden paths", "node", req.NodeID, "error", restoreErr)
+		}
+	}()
 
 	ctx := context.Background()
 	cancel := func() {}
@@ -150,6 +160,76 @@ func (a codexAgent) Run(req AgentRequest) (AgentResponse, error) {
 		parsed.ContextUpdates = map[string]any{}
 	}
 	return parsed, nil
+}
+
+type hiddenPath struct {
+	original string
+	hidden   string
+}
+
+func hideWorkspacePaths(workspace, nodeDir string, blocked []string) ([]hiddenPath, error) {
+	if len(blocked) == 0 {
+		return nil, nil
+	}
+	base := filepath.Join(nodeDir, ".hidden_read_paths")
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		return nil, err
+	}
+	paths := append([]string(nil), blocked...)
+	sort.Strings(paths)
+	hidden := make([]hiddenPath, 0, len(paths))
+	for _, rel := range paths {
+		rel = filepath.ToSlash(strings.TrimSpace(rel))
+		if rel == "" {
+			continue
+		}
+		if strings.HasPrefix(rel, "/") {
+			return nil, fmt.Errorf("blocked read path %q must be relative", rel)
+		}
+		for _, seg := range strings.Split(filepath.Clean(rel), string(filepath.Separator)) {
+			if seg == ".." {
+				return nil, fmt.Errorf("blocked read path %q contains parent segment", rel)
+			}
+		}
+		orig := filepath.Join(workspace, filepath.FromSlash(rel))
+		if _, err := os.Stat(orig); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, err
+		}
+		dst := filepath.Join(base, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return nil, err
+		}
+		if err := os.Rename(orig, dst); err != nil {
+			_ = restoreWorkspacePaths(hidden)
+			return nil, err
+		}
+		hidden = append(hidden, hiddenPath{original: orig, hidden: dst})
+	}
+	return hidden, nil
+}
+
+func restoreWorkspacePaths(hidden []hiddenPath) error {
+	if len(hidden) == 0 {
+		return nil
+	}
+	for i := len(hidden) - 1; i >= 0; i-- {
+		h := hidden[i]
+		if err := os.MkdirAll(filepath.Dir(h.original), 0o755); err != nil {
+			return err
+		}
+		if _, err := os.Stat(h.original); err == nil {
+			return fmt.Errorf("blocked path was recreated during execution: %s", h.original)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := os.Rename(h.hidden, h.original); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func readAndMaybeLogStream(r io.Reader, sink io.Writer, stream string, nodeID string, logger *slog.Logger, logStream bool) error {

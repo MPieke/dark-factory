@@ -113,6 +113,12 @@ Per-run directory (`<runsdir>/<run-id>/`):
   - `stub` (default)
   - `codex` (CLI-driven)
 - Codex backend configuration supports sandbox mode, approval policy, working dir, additional dirs, and raw `-c key=value` overrides.
+- Codex backend read isolation:
+  - by default, `scripts/scenarios/` is hidden from Codex nodes during execution.
+  - this prevents builder agents from reading holdout scenario validators.
+  - configurable via:
+    - `codex.block_read_paths` / `ATTRACTOR_CODEX_BLOCK_READ_PATHS`
+    - `codex.allow_read_scenarios=true` (opt-out of default scenario hide)
 - Codex backend supports execution controls:
   - `codex.timeout_seconds` / `ATTRACTOR_CODEX_TIMEOUT_SECONDS`
   - `codex.heartbeat_seconds` / `ATTRACTOR_CODEX_HEARTBEAT_SECONDS`
