@@ -87,10 +87,12 @@ Why:
 ## 8) Event + checkpoint persistence
 Decision:
 - Persist both append-only events and stateful checkpoints.
+- Persist a structured session trace stream for execution transparency (`trace.jsonl`).
 
 Why:
 - `events.jsonl` provides timeline/audit.
 - `checkpoint.json` provides minimal resume state.
+- `trace.jsonl` captures node inputs/outputs/context transformations/route decisions for replay-grade debugging.
 - Combined model improves operational clarity.
 
 ## 9) Prompt handling and AI backend in v0

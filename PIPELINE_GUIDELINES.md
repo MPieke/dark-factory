@@ -174,4 +174,5 @@ Expected generated verification plan shape:
 - Guardrails are defined for executable nodes.
 - Test node verifies success criteria.
 - Failure path exists and is intentional.
+- Run artifacts include expected trace records in `trace.jsonl` for key stages.
 - `go test ./...` passes after any runtime changes.

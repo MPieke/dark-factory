@@ -90,3 +90,13 @@ This file records concrete failure modes seen in this repo and the fixes applied
   - Persisted `verification.plan.json` and `verification.results.json` artifacts.
 - Prevention:
   - For behavior-based validation flows, require explicit verification plan + command prefix allowlist.
+
+## 10) Artifacts were split and hard to correlate during debugging
+- Failure mode:
+  - Understanding a run required manual correlation across status/events/tool logs.
+- Root cause:
+  - No single structured session trace covering inputs, outputs, transformations, and route choices.
+- Fix:
+  - Added per-run `trace.jsonl` with typed records (`NodeInputCaptured`, `NodeOutputCaptured`, `RouteEvaluated`, etc.).
+- Prevention:
+  - For future runtime changes, include trace record updates and tests proving trace coverage.

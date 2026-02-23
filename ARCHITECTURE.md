@@ -10,6 +10,7 @@
 4. Engine prepares run directory and workspace snapshot copy.
 5. Engine executes nodes from `start` to an `exit` node.
 6. Engine persists per-stage status, workspace diffs, checkpoints, and event log.
+7. Engine appends structured session trace records for inputs/outputs/transforms/routing.
 
 ## Components
 - `cmd/factory/main.go`
@@ -71,6 +72,7 @@ Verification stage behavior (`type=verification`):
 Per-run directory (`<runsdir>/<run-id>/`):
 - `manifest.json`
 - `events.jsonl`
+- `trace.jsonl`
 - `checkpoint.json`
 - `workspace/` (copied source workdir)
 - Per-node dir:
@@ -79,6 +81,13 @@ Per-run directory (`<runsdir>/<run-id>/`):
   - `prompt.md` and `response.md` (codergen)
   - `tool.stdout.txt`, `tool.stderr.txt`, `tool.exitcode.txt` (tool)
   - `verification.plan.json`, `verification.results.json` (verification)
+
+`trace.jsonl` includes records such as:
+- `SessionInitialized`
+- `PipelineStarted` / `PipelineCompleted` / `PipelineFailed`
+- `NodeInputCaptured`
+- `NodeOutputCaptured` (including context delta)
+- `RouteEvaluated`
 
 ## Resume model
 - `--resume --run-id <id>` reloads checkpoint and completed node state.

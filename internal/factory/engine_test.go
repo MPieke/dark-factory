@@ -70,6 +70,13 @@ func TestExecLinearArtifacts(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(runsdir, "r1", "checkpoint.json")); err != nil {
 		t.Fatal(err)
 	}
+	traceTypes := readJSONLTypes(t, filepath.Join(runsdir, "r1", "trace.jsonl"))
+	traceJoined := strings.Join(traceTypes, ",")
+	for _, want := range []string{"SessionInitialized", "PipelineStarted", "NodeInputCaptured", "NodeOutputCaptured", "RouteEvaluated", "PipelineCompleted"} {
+		if !strings.Contains(traceJoined, want) {
+			t.Fatalf("missing trace type %s in %s", want, traceJoined)
+		}
+	}
 }
 
 func TestExecToolCapturesOutput(t *testing.T) {

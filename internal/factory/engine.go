@@ -116,6 +116,13 @@ func RunPipeline(cfg RunConfig) error {
 	if err := writeManifest(g, cfg, runDir, workspace); err != nil {
 		return err
 	}
+	_ = appendTrace(runDir, "SessionInitialized", map[string]any{
+		"run_id":        cfg.RunID,
+		"pipeline_path": cfg.PipelinePath,
+		"workdir":       cfg.Workdir,
+		"workspace":     workspace,
+		"resume":        cfg.Resume,
+	})
 
 	e := &Engine{Graph: g, RunID: cfg.RunID, RunDir: runDir, Workspace: workspace, Context: Context{}, RetryCount: map[string]int{}, Completed: map[string]bool{}}
 	if goal, ok := g.Attrs["goal"]; ok {
@@ -137,6 +144,11 @@ func RunPipeline(cfg RunConfig) error {
 			if err != nil {
 				return err
 			}
+			_ = appendTrace(runDir, "ResumeLoaded", map[string]any{
+				"last_completed_node": cp.LastCompletedNode,
+				"last_outcome":        status.Outcome,
+				"completed_nodes":     cp.CompletedNodes,
+			})
 			next := e.selectNext(cp.LastCompletedNode, status.Outcome)
 			if next == "" {
 				if isExit(g, cp.LastCompletedNode) {
@@ -149,11 +161,14 @@ func RunPipeline(cfg RunConfig) error {
 	}
 
 	_ = appendEvent(runDir, map[string]any{"schema_version": 1, "type": "PipelineStarted", "run_id": cfg.RunID, "at": time.Now().UTC().Format(time.RFC3339Nano)})
+	_ = appendTrace(runDir, "PipelineStarted", map[string]any{"run_id": cfg.RunID, "start_node": startID})
 	if err := e.executeFrom(startID); err != nil {
 		_ = appendEvent(runDir, map[string]any{"schema_version": 1, "type": "PipelineFailed", "error": err.Error(), "at": time.Now().UTC().Format(time.RFC3339Nano)})
+		_ = appendTrace(runDir, "PipelineFailed", map[string]any{"error": err.Error()})
 		return err
 	}
 	_ = appendEvent(runDir, map[string]any{"schema_version": 1, "type": "PipelineCompleted", "at": time.Now().UTC().Format(time.RFC3339Nano)})
+	_ = appendTrace(runDir, "PipelineCompleted", map[string]any{})
 	return nil
 }
 
@@ -169,11 +184,21 @@ func (e *Engine) executeFrom(startID string) error {
 			return err
 		}
 		_ = appendEvent(e.RunDir, map[string]any{"schema_version": 1, "type": "StageStarted", "node_id": node.ID, "at": time.Now().UTC().Format(time.RFC3339Nano)})
-
+		contextBefore := cloneContext(e.Context)
+		_ = appendTrace(e.RunDir, "NodeInputCaptured", map[string]any{
+			"node_id":           node.ID,
+			"node_type":         node.Type(),
+			"node_shape":        node.Shape(),
+			"node_attrs":        cloneMap(node.Attrs),
+			"context_before":    contextBefore,
+			"workspace":         e.Workspace,
+			"node_artifact_dir": nodeDir,
+		})
 		e.Context["current_node"] = node.ID
 		out, err := e.executeNode(node, nodeDir)
 		if err != nil {
 			_ = appendEvent(e.RunDir, map[string]any{"schema_version": 1, "type": "StageFailed", "node_id": node.ID, "error": err.Error(), "at": time.Now().UTC().Format(time.RFC3339Nano)})
+			_ = appendTrace(e.RunDir, "NodeExecutionErrored", map[string]any{"node_id": node.ID, "error": err.Error()})
 			return err
 		}
 		if err := writeJSON(filepath.Join(nodeDir, "status.json"), out); err != nil {
@@ -188,6 +213,16 @@ func (e *Engine) executeFrom(startID string) error {
 			e.Context[k] = v
 		}
 		e.Context["outcome"] = out.Outcome
+		contextAfter := cloneContext(e.Context)
+		_ = appendTrace(e.RunDir, "NodeOutputCaptured", map[string]any{
+			"node_id":         node.ID,
+			"outcome":         out.Outcome,
+			"failure_reason":  out.FailureReason,
+			"context_updates": cloneMap(out.ContextUpdates),
+			"context_after":   contextAfter,
+			"context_delta":   computeContextDelta(contextBefore, contextAfter),
+			"status_path":     filepath.Join(node.ID, "status.json"),
+		})
 		e.Completed[node.ID] = true
 		if err := e.writeCheckpoint(node.ID); err != nil {
 			return err
@@ -199,6 +234,12 @@ func (e *Engine) executeFrom(startID string) error {
 			return nil
 		}
 		next := e.selectNext(node.ID, out.Outcome)
+		_ = appendTrace(e.RunDir, "RouteEvaluated", map[string]any{
+			"from_node":  node.ID,
+			"outcome":    out.Outcome,
+			"next_node":  next,
+			"candidates": routeCandidates(e.Graph, node.ID, out.Outcome),
+		})
 		if next == "" {
 			return fmt.Errorf("no route from node %s for outcome %s", node.ID, out.Outcome)
 		}
@@ -679,6 +720,96 @@ func appendEvent(runDir string, event map[string]any) error {
 	}
 	_, err = f.Write(append(b, '\n'))
 	return err
+}
+
+func appendTrace(runDir, recordType string, fields map[string]any) error {
+	rec := map[string]any{
+		"schema_version": 1,
+		"type":           recordType,
+		"at":             time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	for k, v := range fields {
+		rec[k] = v
+	}
+	f, err := os.OpenFile(filepath.Join(runDir, "trace.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(append(b, '\n'))
+	return err
+}
+
+func cloneContext(ctx Context) map[string]any {
+	if ctx == nil {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(ctx))
+	for k, v := range ctx {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneMap(in map[string]any) map[string]any {
+	if in == nil {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func computeContextDelta(before, after map[string]any) map[string]any {
+	added := map[string]any{}
+	updated := map[string]any{}
+	removed := []string{}
+	for k, vAfter := range after {
+		vBefore, ok := before[k]
+		if !ok {
+			added[k] = vAfter
+			continue
+		}
+		if fmt.Sprintf("%v", vBefore) != fmt.Sprintf("%v", vAfter) {
+			updated[k] = map[string]any{"before": vBefore, "after": vAfter}
+		}
+	}
+	for k := range before {
+		if _, ok := after[k]; !ok {
+			removed = append(removed, k)
+		}
+	}
+	sort.Strings(removed)
+	return map[string]any{"added": added, "updated": updated, "removed": removed}
+}
+
+func routeCandidates(g *Graph, from, outcome string) []map[string]any {
+	out := []map[string]any{}
+	for _, e := range g.Edges {
+		if e.From != from {
+			continue
+		}
+		cond := strings.TrimSpace(e.StringAttr("condition", ""))
+		out = append(out, map[string]any{
+			"to":        e.To,
+			"weight":    e.IntAttr("weight", 0),
+			"condition": cond,
+			"matched":   cond == "" || cond == "outcome="+outcome,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i]["to"].(string) != out[j]["to"].(string) {
+			return out[i]["to"].(string) < out[j]["to"].(string)
+		}
+		return out[i]["condition"].(string) < out[j]["condition"].(string)
+	})
+	return out
 }
 
 func writeJSON(path string, v any) error {

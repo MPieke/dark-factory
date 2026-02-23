@@ -93,6 +93,7 @@ Optional flags:
 For run id `demo`, artifacts are in `runs/demo/`:
 - `manifest.json`: run metadata.
 - `events.jsonl`: pipeline/stage lifecycle events.
+- `trace.jsonl`: structured per-session trace (inputs, outputs, context transforms, route decisions).
 - `checkpoint.json`: resume state.
 - `<node-id>/status.json`: node outcome.
 - `<node-id>/prompt.md`, `response.md`: codergen node inputs/outputs.
