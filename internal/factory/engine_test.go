@@ -252,6 +252,20 @@ func TestGuardEscapeHeuristics(t *testing.T) {
 	}
 }
 
+func TestGuardAllowsGoTestDotDotDot(t *testing.T) {
+	dot := `digraph G { start [shape=Mdiamond]; t [shape=parallelogram, tool_command="go test ./..."]; exit [shape=Msquare]; start -> t; t -> exit; }`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	writeFile(t, filepath.Join(workdir, "go.mod"), "module x\n\ngo 1.22\n")
+	writeFile(t, filepath.Join(workdir, "x_test.go"), "package x\nimport \"testing\"\nfunc TestX(t *testing.T){}\n")
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r11b"}); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := os.ReadFile(filepath.Join(runsdir, "r11b", "t", "status.json"))
+	if !strings.Contains(string(st), `"outcome": "success"`) {
+		t.Fatalf("expected success, got: %s", string(st))
+	}
+}
+
 func TestGuardNoWritesOutsideWorkspace(t *testing.T) {
 	root := t.TempDir()
 	workdir := filepath.Join(root, "work")
@@ -381,5 +395,36 @@ func TestVerificationNodeRejectsCommandOutsideAllowlist(t *testing.T) {
 	st, _ := os.ReadFile(filepath.Join(runsdir, "r16", "verify", "status.json"))
 	if !strings.Contains(string(st), "command not allowed") {
 		t.Fatalf("expected command allowlist failure: %s", string(st))
+	}
+}
+
+func TestVerificationNodeAllowsEnvPrefixedGoCommand(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	generate [
+		shape=box,
+		"test.verification_plan_json"="{\"files\":[\"go.mod\",\"main.go\"],\"commands\":[\"GOCACHE=\\\"$PWD/.gocache\\\" go test ./...\"]}"
+	];
+	verify [
+		shape=parallelogram,
+		type=verification,
+		"verification.allowed_commands"="go test"
+	];
+	exit [shape=Msquare];
+	start -> generate;
+	generate -> verify;
+	verify -> exit [condition="outcome=success"];
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	writeFile(t, filepath.Join(workdir, "go.mod"), "module x\n\ngo 1.22\n")
+	writeFile(t, filepath.Join(workdir, "main.go"), "package main\nfunc main(){}\n")
+	writeFile(t, filepath.Join(workdir, "main_test.go"), "package main\nimport \"testing\"\nfunc TestX(t *testing.T){}\n")
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r17"}); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := os.ReadFile(filepath.Join(runsdir, "r17", "verify", "status.json"))
+	if !strings.Contains(string(st), `"outcome": "success"`) {
+		t.Fatalf("expected verification success: %s", string(st))
 	}
 }

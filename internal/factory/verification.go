@@ -36,7 +36,7 @@ func (verificationHandler) Execute(node *Node, ctx Context, _ *Graph, nodeDir st
 			FailureReason:    fmt.Sprintf("verification plan missing in context key: %s", key),
 		}, nil
 	}
-	plan, err := ParseVerificationPlan(raw)
+	plan, err := ParseVerificationPlanForWorkspace(raw, workspace)
 	if err != nil {
 		return Outcome{
 			SchemaVersion:    1,
@@ -151,7 +151,7 @@ func (verificationHandler) Execute(node *Node, ctx Context, _ *Graph, nodeDir st
 }
 
 func commandAllowed(command string, allowedPrefixes []string) bool {
-	cmd := strings.TrimSpace(command)
+	cmd := normalizeCommandForAllowlist(command)
 	for _, p := range allowedPrefixes {
 		p = strings.TrimSpace(p)
 		if p == "" {
@@ -165,4 +165,81 @@ func commandAllowed(command string, allowedPrefixes []string) bool {
 		}
 	}
 	return false
+}
+
+func normalizeCommandForAllowlist(command string) string {
+	cmd := strings.TrimSpace(command)
+	for {
+		original := cmd
+		cmd = trimWrappingParens(cmd)
+		cmd = stripLeadingEnvAssignments(cmd)
+		cmd = stripLeadingShellWrappers(cmd)
+		cmd = strings.TrimSpace(cmd)
+		if cmd == original {
+			break
+		}
+	}
+	return cmd
+}
+
+func trimWrappingParens(cmd string) string {
+	cmd = strings.TrimSpace(cmd)
+	for len(cmd) >= 2 && strings.HasPrefix(cmd, "(") && strings.HasSuffix(cmd, ")") {
+		inner := strings.TrimSpace(cmd[1 : len(cmd)-1])
+		if inner == "" {
+			break
+		}
+		cmd = inner
+	}
+	return cmd
+}
+
+func stripLeadingEnvAssignments(cmd string) string {
+	fields := strings.Fields(cmd)
+	i := 0
+	for i < len(fields) && isEnvAssignmentToken(fields[i]) {
+		i++
+	}
+	if i == 0 {
+		return cmd
+	}
+	return strings.Join(fields[i:], " ")
+}
+
+func isEnvAssignmentToken(tok string) bool {
+	if tok == "" || strings.HasPrefix(tok, "=") || strings.HasSuffix(tok, "=") {
+		return false
+	}
+	eq := strings.IndexByte(tok, '=')
+	if eq <= 0 {
+		return false
+	}
+	key := tok[:eq]
+	for i, r := range key {
+		if i == 0 {
+			if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && r != '_' {
+				return false
+			}
+			continue
+		}
+		if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func stripLeadingShellWrappers(cmd string) string {
+	trimmed := strings.TrimSpace(cmd)
+	if strings.HasPrefix(trimmed, "export ") {
+		if idx := strings.Index(trimmed, "&&"); idx >= 0 {
+			return strings.TrimSpace(trimmed[idx+2:])
+		}
+	}
+	if strings.HasPrefix(trimmed, "cd ") {
+		if idx := strings.Index(trimmed, "&&"); idx >= 0 {
+			return strings.TrimSpace(trimmed[idx+2:])
+		}
+	}
+	return cmd
 }

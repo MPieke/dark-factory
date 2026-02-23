@@ -6,7 +6,7 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    
+
 permissions:
   contents: read
 
@@ -39,3 +39,6 @@ jobs:
 
       - name: Run verification smoke test
         run: bash scripts/smoke_verification.sh
+
+      - name: Run verification allowlist smoke test
+        run: bash scripts/smoke_verification_allowlist.sh

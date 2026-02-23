@@ -36,6 +36,7 @@ This repo uses a spec-first, test-first approach with automation as the default 
 - End-to-end tests:
   - Full `RunPipeline` flows and run artifact verification
   - Smoke validation through `scripts/smoke.sh`
+  - Verification command allowlist smoke through `scripts/smoke_verification_allowlist.sh`
 
 ## Anti-reward-hacking guardrails
 - Never “test only the happy path” when adding capabilities.

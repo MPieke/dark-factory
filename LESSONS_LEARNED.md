@@ -184,3 +184,16 @@ This file records concrete failure modes seen in this repo and the fixes applied
 - Prevention (test/check/guardrail):
   - Keep cache/temp outputs within explicitly allowed directories.
   - Prefer tightening execution directory over broadening `allowed_write_paths`.
+
+## 16) Verification plan commands failed allowlist due shell wrappers
+- Symptom:
+  - `verify_plan` failed with `verification command not allowed: GOCACHE="..." go test ./...`.
+- Root cause:
+  - Allowlist matching previously required literal command prefix at position 0.
+  - Env-prefix and wrapper forms (`GOCACHE=...`, `cd ... &&`, `export ... &&`) were not normalized.
+- Fix:
+  - Normalized verification commands before allowlist checks to match effective command intent.
+  - Added integration and smoke coverage for env-prefixed `go test`.
+- Prevention (test/check/guardrail):
+  - Keep command allowlist policy focused on effective command families (`go test`, `go build`, `gofmt`).
+  - Run `scripts/smoke_verification_allowlist.sh` in CI.

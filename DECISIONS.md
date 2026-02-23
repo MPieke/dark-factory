@@ -192,3 +192,14 @@ Decision:
 Why:
 - Prevents guardrail false failures caused by cache writes under workspace root (`.gocache/...`).
 - Preserves tight write boundaries without weakening policy.
+
+## 17) Verification allowlist matches normalized command intent
+Decision:
+- Verification allowlist matching now normalizes commands before prefix checks:
+  - strips leading env assignments (for example `GOCACHE=...`)
+  - strips leading `cd ... &&` and `export ... &&` wrappers
+  - trims wrapping parentheses
+
+Why:
+- Keeps allowlist policy focused on effective command intent (`go test`, `go build`) instead of fragile shell wrappers.
+- Reduces false-negative verification failures while preserving command-prefix guardrails.
