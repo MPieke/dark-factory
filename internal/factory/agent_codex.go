@@ -186,8 +186,8 @@ func hideWorkspacePaths(workspace, nodeDir string, blocked []string) ([]hiddenPa
 	if len(blocked) == 0 {
 		return nil, nil
 	}
-	base := filepath.Join(nodeDir, ".hidden_read_paths")
-	if err := os.MkdirAll(base, 0o755); err != nil {
+	base, err := os.MkdirTemp(nodeDir, ".hidden_read_paths.")
+	if err != nil {
 		return nil, err
 	}
 	paths := append([]string(nil), blocked...)
