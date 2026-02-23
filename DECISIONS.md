@@ -203,3 +203,13 @@ Decision:
 Why:
 - Keeps allowlist policy focused on effective command intent (`go test`, `go build`) instead of fragile shell wrappers.
 - Reduces false-negative verification failures while preserving command-prefix guardrails.
+
+## 18) Builder prompts must avoid orchestrator metadata
+Decision:
+- Agent builder nodes should consume a product-only builder spec, not orchestration context.
+- Pipeline metadata (layers, routing, node strategy, validation topology) stays outside builder-visible spec files.
+
+Why:
+- Reduces implementation bias toward pipeline mechanics.
+- Keeps agent behavior aligned with product outcomes rather than orchestrator internals.
+- Preserves clean separation between build intent and evaluation policy.

@@ -74,6 +74,13 @@ Practical implication:
   - `codex.allow_read_scenarios=true`
   - or custom blocked paths with `codex.block_read_paths`.
 
+## Spec separation (recommended)
+- Use two spec layers:
+  - builder-visible product spec (what to build)
+  - orchestration/evaluation docs (how factory validates/routes)
+- Builder prompts should reference only product spec paths.
+- Avoid including pipeline internals (nodes, routing, layered architecture notes) in builder-visible specs.
+
 Example:
 ```dot
 implement [

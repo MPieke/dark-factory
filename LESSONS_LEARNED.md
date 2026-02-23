@@ -197,3 +197,17 @@ This file records concrete failure modes seen in this repo and the fixes applied
 - Prevention (test/check/guardrail):
   - Keep command allowlist policy focused on effective command families (`go test`, `go build`, `gofmt`).
   - Run `scripts/smoke_verification_allowlist.sh` in CI.
+
+## 17) Builder spec leaked orchestration context and biased implementation
+- Symptom:
+  - Agent logs showed full orchestrator/layer context being read from builder-visible spec.
+- Root cause:
+  - `examples/specs/agent_cli_poc_spec.md` mixed product requirements with factory orchestration description.
+- Fix:
+  - Added a dedicated product-only builder spec:
+    - `examples/specs/agent_cli_builder_spec.md`
+  - Updated builder/fix prompts to read only builder spec.
+  - Explicitly instructed agent not to rely on orchestrator/pipeline metadata.
+- Prevention (test/check/guardrail):
+  - Keep builder-visible specs free of orchestration internals.
+  - Keep orchestration docs in separate files not referenced by builder prompts.
