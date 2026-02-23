@@ -138,3 +138,19 @@ This file records concrete failure modes seen in this repo and the fixes applied
 - Prevention (test/check/guardrail):
   - Keep using `go test ./...` as commit gate for engine changes.
   - Prefer external runs directory in local usage, but nested runsdir is now safe.
+
+## 13) Fix loops can persist when validation fails due external provider config
+- Symptom:
+  - Pipeline repeatedly cycled `validate_user_scenarios -> fix -> validate_component -> validate_user_scenarios`.
+- Root cause:
+  - Validation failure came from external provider/model configuration (HTTP 404 model not found), not code defects in `agent/`.
+  - `fix` node was restricted to `allowed_write_paths="agent/"`, so it could not remediate scenario/config failures.
+- Fix:
+  - Added shared scenario preflight harness `scripts/scenarios/preflight_scenario.sh`.
+  - Standardized user scenarios on `SCENARIO_MODE=selftest|live`:
+    - `selftest` for deterministic script logic.
+    - `live` for real API/dependency checks.
+- Prevention (test/check/guardrail):
+  - Run selftest first to detect scenario bugs early.
+  - Classify live failures as external/config issues when code checks already pass.
+  - Parameterize live model IDs via env vars to avoid hardcoded unavailable models.

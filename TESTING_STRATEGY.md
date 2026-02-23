@@ -51,6 +51,14 @@ This repo uses a spec-first, test-first approach with automation as the default 
   - test evidence conflicts
   - safety or policy intent is unclear
 
+## Scenario preflight policy
+- Scenario scripts should implement `SCENARIO_MODE=selftest|live`.
+- `selftest` must not require external services and should fail only for scenario logic defects.
+- `live` validates real external behavior (for example provider API calls) and can fail for runtime/config issues.
+- Prefer running scenarios through the shared harness:
+  - `bash scripts/scenarios/preflight_scenario.sh <scenario_script> <app_dir>`
+- Use `REQUIRE_LIVE=0` only when intentionally skipping external dependency checks.
+
 ## Spec quality requirements
 Specs should be precise enough that two independent implementations converge:
 - Explicit allowed and disallowed behavior

@@ -143,7 +143,19 @@ Decision:
 Why:
 - Keeps command-line behavior simple while distinguishing severe internal failures.
 
-## 13) Testing philosophy
+## 13) Scenario validation uses split preflight modes
+Decision:
+- Standardize scenario scripts on:
+  - `SCENARIO_MODE=selftest` for deterministic script correctness checks.
+  - `SCENARIO_MODE=live` for real external/API behavior checks.
+- Use shared runner `scripts/scenarios/preflight_scenario.sh` to run selftest first, then live checks when `REQUIRE_LIVE=1`.
+
+Why:
+- Avoids conflating scenario bugs with provider/network/config failures.
+- Fails fast on broken scenario logic before expensive fix loops.
+- Keeps validation policy reusable across scenario types.
+
+## 14) Testing philosophy
 Decision:
 - Use spec-first and test-first development as the default.
 - Prefer autonomous, executable validation (AI-run tests) over manual inspection.

@@ -33,6 +33,8 @@
   - Deterministic verification handler that executes structured verification plans from context.
 - `internal/factory/verification_plan.go`
   - Verification plan schema/parsing and safe relative-path normalization.
+- `scripts/scenarios/preflight_scenario.sh`
+  - Shared scenario harness that runs deterministic `selftest` checks and optional `live` checks.
 
 ## Data model
 - Graph:
@@ -69,6 +71,12 @@ Verification stage behavior (`type=verification`):
 - Plan includes required files and commands.
 - Enforces per-node command prefix allowlist (`verification.allowed_commands`).
 - Writes `verification.plan.json` and `verification.results.json`.
+
+Scenario validation contract:
+- Scenario scripts support `SCENARIO_MODE=selftest|live`.
+- `selftest` mode must be deterministic and succeed unless the scenario logic is broken.
+- `live` mode validates real integrations (provider/API/network) when enabled.
+- Shared runner `scripts/scenarios/preflight_scenario.sh` enforces this sequence.
 
 ## Artifacts
 Per-run directory (`<runsdir>/<run-id>/`):

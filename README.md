@@ -186,6 +186,7 @@ Notes:
 - `codex.stdout.log` and `codex.stderr.log` are written incrementally while the node runs.
 - If `--runsdir` is under `--workdir` (for example `--runsdir ./.runs`), factory excludes that nested path from workspace copy to avoid recursive copy loops.
 - The generated agent CLI in examples reads API keys from process environment (`os.Getenv`) and does not auto-load `.env`.
+- This repo ignores generated run artifacts under `.runs/` via `.gitignore`.
 
 Codex can also return an optional `verification_plan` object. The engine stores it in context (default key `verification.plan`) so a later `type=verification` node can execute deterministic checks from that plan.
 
@@ -196,3 +197,22 @@ Run the included smoke test:
 ```bash
 bash scripts/smoke.sh
 ```
+
+## Scenario preflight harness
+
+Use the shared scenario harness to split deterministic scenario checks from live dependency checks:
+
+```bash
+bash scripts/scenarios/preflight_scenario.sh scripts/scenarios/hello_user_scenarios.sh app
+```
+
+For agent CLI scenarios:
+
+```bash
+bash scripts/scenarios/preflight_scenario.sh scripts/scenarios/agent_cli_user_scenarios.sh agent
+```
+
+Behavior:
+- Runs `SCENARIO_MODE=selftest` first (should only fail for scenario bugs).
+- Runs `SCENARIO_MODE=live` next when `REQUIRE_LIVE=1` (default).
+- Set `REQUIRE_LIVE=0` to skip real API checks.

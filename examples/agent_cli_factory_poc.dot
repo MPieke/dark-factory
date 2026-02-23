@@ -1,0 +1,64 @@
+digraph AgentCliFactoryPOC {
+  graph [goal="Build a working agent CLI in agent/ with cheap-model defaults and deterministic mock mode"];
+
+  start [shape=Mdiamond];
+  exit [shape=Msquare];
+
+  implement [
+    shape=box,
+    agent.backend="codex",
+    codex.sandbox="workspace-write",
+    codex.approval="never",
+    codex.timeout_seconds=900,
+    codex.heartbeat_seconds=15,
+    codex.skip_git_repo_check=true,
+    allowed_write_paths="agent/",
+    prompt="Read examples/specs/agent_cli_poc_spec.md.\n\nImplement the CLI in agent/.\n\nRules:\n- Only modify agent/\n- Do not modify scripts/scenarios/\n- Return strict JSON and include verification_plan.\n\nRun local checks before finishing."
+  ];
+
+  verify_plan [
+    shape=parallelogram,
+    type=verification,
+    "verification.allowed_commands"="bash scripts/scenarios/agent_cli_component_checks.sh,bash scripts/scenarios/agent_cli_user_scenarios.sh,bash scripts/scenarios/preflight_scenario.sh"
+  ];
+
+  validate_component [
+    shape=parallelogram,
+    type=tool,
+    tool_command="bash scripts/scenarios/agent_cli_component_checks.sh agent"
+  ];
+
+  validate_user_scenarios [
+    shape=parallelogram,
+    type=tool,
+    tool_command="bash scripts/scenarios/preflight_scenario.sh scripts/scenarios/agent_cli_user_scenarios.sh agent"
+  ];
+
+  fix [
+    shape=box,
+    agent.backend="codex",
+    codex.sandbox="workspace-write",
+    codex.approval="never",
+    codex.timeout_seconds=900,
+    codex.heartbeat_seconds=15,
+    codex.skip_git_repo_check=true,
+    allowed_write_paths="agent/",
+    prompt="Validation failed.\n\nFix agent/ so all validations pass.\nRead spec and scenario scripts.\nReturn strict JSON and include verification_plan."
+  ];
+
+  start -> implement;
+  implement -> verify_plan [condition="outcome=success"];
+  implement -> fix [condition="outcome=fail"];
+
+  verify_plan -> validate_component [condition="outcome=success"];
+  verify_plan -> fix [condition="outcome=fail"];
+
+  validate_component -> validate_user_scenarios [condition="outcome=success"];
+  validate_component -> fix [condition="outcome=fail"];
+
+  validate_user_scenarios -> exit [condition="outcome=success"];
+  validate_user_scenarios -> fix [condition="outcome=fail"];
+
+  fix -> validate_component [condition="outcome=success"];
+  fix -> fix [condition="outcome=fail"];
+}
