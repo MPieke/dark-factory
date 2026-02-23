@@ -3,6 +3,7 @@ package attractor
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -67,5 +68,48 @@ func TestRestoreWorkspacePathsFailsWhenBlockedPathRecreated(t *testing.T) {
 	}
 	if err := restoreWorkspacePaths(hidden); err == nil {
 		t.Fatal("expected restore conflict error")
+	}
+}
+
+func TestStrictReadScopeBlockedPaths(t *testing.T) {
+	workspace := t.TempDir()
+	mustMkdir := func(rel string) {
+		if err := os.MkdirAll(filepath.Join(workspace, rel), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite := func(rel string) {
+		p := filepath.Join(workspace, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustMkdir("agent")
+	mustMkdir("examples/specs")
+	mustMkdir("scripts/scenarios")
+	mustWrite("README.md")
+
+	blocked, err := strictReadScopeBlockedPaths(
+		workspace,
+		filepath.Join(workspace, "agent"),
+		[]string{filepath.Join(workspace, "examples/specs")},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(blocked, "agent/") {
+		t.Fatalf("agent should not be blocked: %+v", blocked)
+	}
+	if slices.Contains(blocked, "examples/") {
+		t.Fatalf("examples should not be blocked: %+v", blocked)
+	}
+	if !slices.Contains(blocked, "scripts/") {
+		t.Fatalf("scripts should be blocked: %+v", blocked)
+	}
+	if !slices.Contains(blocked, "README.md") {
+		t.Fatalf("README should be blocked: %+v", blocked)
 	}
 }

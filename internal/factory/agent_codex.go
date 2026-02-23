@@ -47,6 +47,21 @@ func (a codexAgent) Run(req AgentRequest) (AgentResponse, error) {
 	if err != nil {
 		return AgentResponse{}, err
 	}
+	if a.opts.StrictReadScope {
+		scopeBlocked, err := strictReadScopeBlockedPaths(req.Workspace, a.opts.Workdir, a.opts.AddDirs)
+		if err != nil {
+			_ = restoreWorkspacePaths(hiddenPaths)
+			return AgentResponse{}, err
+		}
+		if len(scopeBlocked) > 0 {
+			additionalHidden, err := hideWorkspacePaths(req.Workspace, req.NodeDir, scopeBlocked)
+			if err != nil {
+				_ = restoreWorkspacePaths(hiddenPaths)
+				return AgentResponse{}, err
+			}
+			hiddenPaths = append(hiddenPaths, additionalHidden...)
+		}
+	}
 	defer func() {
 		if restoreErr := restoreWorkspacePaths(hiddenPaths); restoreErr != nil {
 			logger.Error("failed to restore hidden paths", "node", req.NodeID, "error", restoreErr)
@@ -230,6 +245,49 @@ func restoreWorkspacePaths(hidden []hiddenPath) error {
 		}
 	}
 	return nil
+}
+
+func strictReadScopeBlockedPaths(workspace, workdir string, addDirs []string) ([]string, error) {
+	keepRoots := map[string]bool{}
+	addKeepRoot := func(abs string) {
+		rel, err := filepath.Rel(workspace, abs)
+		if err != nil {
+			return
+		}
+		rel = filepath.ToSlash(filepath.Clean(rel))
+		if rel == "." || strings.HasPrefix(rel, "../") {
+			return
+		}
+		root := strings.Split(rel, "/")[0]
+		if root != "" && root != "." {
+			keepRoots[root] = true
+		}
+	}
+	addKeepRoot(workdir)
+	for _, d := range addDirs {
+		addKeepRoot(d)
+	}
+	if len(keepRoots) == 0 {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(workspace)
+	if err != nil {
+		return nil, err
+	}
+	blocked := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if keepRoots[name] {
+			continue
+		}
+		if entry.IsDir() {
+			blocked = append(blocked, name+"/")
+			continue
+		}
+		blocked = append(blocked, name)
+	}
+	sort.Strings(blocked)
+	return blocked, nil
 }
 
 func readAndMaybeLogStream(r io.Reader, sink io.Writer, stream string, nodeID string, logger *slog.Logger, logStream bool) error {

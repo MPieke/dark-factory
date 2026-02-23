@@ -116,6 +116,7 @@ Per-run directory (`<runsdir>/<run-id>/`):
 - Codex backend read isolation:
   - by default, `scripts/scenarios/` is hidden from Codex nodes during execution.
   - this prevents builder agents from reading holdout scenario validators.
+  - optional strict scope mode (`codex.strict_read_scope`) hides all workspace entries except `codex.workdir` + `codex.add_dirs` during execution.
   - configurable via:
     - `codex.block_read_paths` / `ATTRACTOR_CODEX_BLOCK_READ_PATHS`
     - `codex.allow_read_scenarios=true` (opt-out of default scenario hide)

@@ -213,3 +213,14 @@ Why:
 - Reduces implementation bias toward pipeline mechanics.
 - Keeps agent behavior aligned with product outcomes rather than orchestrator internals.
 - Preserves clean separation between build intent and evaluation policy.
+
+## 19) Strict Codex read scope for builder nodes
+Decision:
+- Support `codex.strict_read_scope=true` to restrict Codex-readable workspace paths to:
+  - `codex.workdir`
+  - explicit `codex.add_dirs`
+- At runtime, all other top-level workspace entries are temporarily hidden during Codex execution.
+
+Why:
+- Prevents accidental reads of repo memory/docs/orchestrator metadata via `..` traversal.
+- Makes builder context explicitly least-privilege instead of convention-based.

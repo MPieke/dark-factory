@@ -68,6 +68,7 @@ Practical implication:
 - For Codex-backed nodes:
   - set `codex.workdir` to the app directory (example: `agent`)
   - set `codex.add_dirs` only for required read context (example: `examples/specs`)
+  - set `codex.strict_read_scope=true` to hard-enforce read scope to workdir + add_dirs
   - keep scenario scripts executed only by tool/verification nodes
 - Keep prompts aligned with this policy (avoid "read scenario scripts" instructions).
 - Only opt out intentionally:
@@ -88,6 +89,7 @@ implement [
   agent.backend="codex",
   codex.workdir="agent",
   codex.add_dirs="examples/specs",
+  codex.strict_read_scope=true,
   allowed_write_paths="agent/",
   prompt="Read ../examples/specs/my_spec.md.\nDo not read scenario scripts.\nUse GOCACHE=\"$PWD/.gocache\" for go commands.\n"
 ];

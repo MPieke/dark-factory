@@ -37,6 +37,7 @@ type CodexOptions struct {
 	Workdir              string
 	AddDirs              []string
 	BlockReadPaths       []string
+	StrictReadScope      bool
 	Model                string
 	Profile              string
 	TimeoutSeconds       int
@@ -106,6 +107,7 @@ func codexOptionsFromNodeAndEnv(node *Node, workspace string) (CodexOptions, err
 	}
 	opts.DangerousBypass = node.BoolAttr("codex.dangerous_bypass", false) || parseBoolEnv("ATTRACTOR_CODEX_DANGEROUS_BYPASS")
 	opts.SkipGitRepoCheck = node.BoolAttr("codex.skip_git_repo_check", false) || parseBoolEnv("ATTRACTOR_CODEX_SKIP_GIT_REPO_CHECK")
+	opts.StrictReadScope = node.BoolAttr("codex.strict_read_scope", false) || parseBoolEnv("ATTRACTOR_CODEX_STRICT_READ_SCOPE")
 	opts.AddDirs = pickList(node.StringAttr("codex.add_dirs", ""), os.Getenv("ATTRACTOR_CODEX_ADD_DIRS"))
 	opts.ConfigOverrides = pickConfigOverrides(node.StringAttr("codex.config_overrides", ""), os.Getenv("ATTRACTOR_CODEX_CONFIG_OVERRIDES"))
 	opts.AutoApproveCommands = pickList(node.StringAttr("codex.auto_approve_commands", ""), os.Getenv("ATTRACTOR_CODEX_AUTO_APPROVE_COMMANDS"))

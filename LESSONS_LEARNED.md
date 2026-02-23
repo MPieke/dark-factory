@@ -211,3 +211,15 @@ This file records concrete failure modes seen in this repo and the fixes applied
 - Prevention (test/check/guardrail):
   - Keep builder-visible specs free of orchestration internals.
   - Keep orchestration docs in separate files not referenced by builder prompts.
+
+## 18) Builder node still read memory docs via parent traversal
+- Symptom:
+  - Codex logs showed reads of `../ARCHITECTURE.md`, `../DECISIONS.md`, `../LESSONS_LEARNED.md`, etc., despite using a builder-only spec.
+- Root cause:
+  - `codex.workdir="agent"` + `codex.add_dirs="examples/specs"` limited intended context but did not hard-restrict parent path reads.
+- Fix:
+  - Added `codex.strict_read_scope` runtime behavior to hide all workspace entries except workdir + add_dirs during Codex execution.
+  - Enabled `codex.strict_read_scope=true` in the Agent CLI POC implement/fix nodes.
+- Prevention (test/check/guardrail):
+  - For builder-isolated pipelines, always set `codex.strict_read_scope=true`.
+  - Keep builder specs and orchestrator docs separated, then enforce separation with strict scope.
