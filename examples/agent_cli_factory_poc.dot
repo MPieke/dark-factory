@@ -11,6 +11,13 @@ digraph AgentCliFactoryPOC {
     tool_command="bash scripts/scenarios/preflight_provider_live.sh"
   ];
 
+  ensure_agent_dir [
+    shape=parallelogram,
+    type=tool,
+    allowed_write_paths="agent/",
+    tool_command="mkdir -p agent"
+  ];
+
   implement [
     shape=box,
     agent.backend="codex",
@@ -58,8 +65,10 @@ digraph AgentCliFactoryPOC {
   ];
 
   start -> preflight_live_deps;
-  preflight_live_deps -> implement [condition="outcome=success"];
+  preflight_live_deps -> ensure_agent_dir [condition="outcome=success"];
   preflight_live_deps -> exit_config_fail [condition="outcome=fail"];
+  ensure_agent_dir -> implement [condition="outcome=success"];
+  ensure_agent_dir -> exit_config_fail [condition="outcome=fail"];
 
   implement -> verify_plan [condition="outcome=success"];
   implement -> fix [condition="outcome=fail"];
