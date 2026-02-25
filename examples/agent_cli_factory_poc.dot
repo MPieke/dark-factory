@@ -24,6 +24,13 @@ digraph AgentCliFactoryPOC {
     tool_command="mkdir -p agent"
   ];
 
+  ensure_codex_wrapper [
+    shape=parallelogram,
+    type=tool,
+    allowed_write_paths=".factory/bin/",
+    tool_command="mkdir -p .factory/bin && cp scripts/codex-wrapper.sh .factory/bin/codex && chmod +x .factory/bin/codex"
+  ];
+
   implement [
     shape=box,
     agent.backend="codex",
@@ -82,8 +89,10 @@ digraph AgentCliFactoryPOC {
   lint_scenarios -> exit_config_fail [condition="outcome=fail"];
   preflight_live_deps -> ensure_agent_dir [condition="outcome=success"];
   preflight_live_deps -> exit_config_fail [condition="outcome=fail"];
-  ensure_agent_dir -> implement [condition="outcome=success"];
+  ensure_agent_dir -> ensure_codex_wrapper [condition="outcome=success"];
   ensure_agent_dir -> exit_config_fail [condition="outcome=fail"];
+  ensure_codex_wrapper -> implement [condition="outcome=success"];
+  ensure_codex_wrapper -> exit_config_fail [condition="outcome=fail"];
 
   implement -> verify_plan [condition="outcome=success"];
   implement -> fix [condition="outcome=fail"];

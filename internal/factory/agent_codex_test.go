@@ -1,9 +1,11 @@
 package attractor
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -90,12 +92,14 @@ func TestStrictReadScopeBlockedPaths(t *testing.T) {
 	mustMkdir("agent")
 	mustMkdir("examples/specs")
 	mustMkdir("scripts/scenarios")
+	mustMkdir(".factory/bin")
 	mustWrite("README.md")
 
 	blocked, err := strictReadScopeBlockedPaths(
 		workspace,
 		filepath.Join(workspace, "agent"),
 		[]string{filepath.Join(workspace, "examples/specs")},
+		filepath.Join(workspace, ".factory/bin/codex"),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -106,10 +110,46 @@ func TestStrictReadScopeBlockedPaths(t *testing.T) {
 	if slices.Contains(blocked, "examples/") {
 		t.Fatalf("examples should not be blocked: %+v", blocked)
 	}
+	if slices.Contains(blocked, ".factory/") {
+		t.Fatalf(".factory should not be blocked when executable is under it: %+v", blocked)
+	}
 	if !slices.Contains(blocked, "scripts/") {
 		t.Fatalf("scripts should be blocked: %+v", blocked)
 	}
 	if !slices.Contains(blocked, "README.md") {
 		t.Fatalf("README should be blocked: %+v", blocked)
+	}
+}
+
+func TestCodexRunMissingExecutableHasClearError(t *testing.T) {
+	workspace := t.TempDir()
+	nodeDir := filepath.Join(t.TempDir(), "implement")
+	if err := os.MkdirAll(nodeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(workspace, ".factory", "bin", "codex")
+	agent := codexAgent{opts: CodexOptions{
+		Executable:   missing,
+		SandboxMode:  "workspace-write",
+		Workdir:      workspace,
+		DisableMCP:   true,
+		TimeoutSeconds: 1,
+	}}
+
+	_, err := agent.Run(AgentRequest{
+		Prompt:    "return success",
+		NodeID:    "implement",
+		NodeDir:   nodeDir,
+		Workspace: workspace,
+		Logger:    slog.Default(),
+	})
+	if err == nil {
+		t.Fatal("expected missing executable error")
+	}
+	if !strings.Contains(err.Error(), "configured codex executable not found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Fatalf("expected missing path in error: %v", err)
 	}
 }

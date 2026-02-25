@@ -259,6 +259,16 @@ Why:
 - Hardcoded model ids caused repeated false-negative scenario failures.
 - Fixed temp filenames create cross-run interference risk.
 
+## 23) Codex executable path must fail fast and be bootstrapped in-pipeline
+Decision:
+- If `codex.path` contains a path separator, validate it exists and is executable before launch.
+- For POC pipelines that depend on a local wrapper path (`.factory/bin/codex`), add a deterministic tool stage to create/copy that wrapper before Codex nodes run.
+
+Why:
+- Prevents opaque `fork/exec ... no such file or directory` failures deep in execution.
+- Makes wrapper setup explicit and auditable in pipeline artifacts.
+- Keeps MCP-disable wrapper behavior deterministic across manual runs.
+
 ## 23) Scenario lint must be a hard preflight guardrail
 Decision:
 - Added `scripts/scenarios/lint_scenarios.sh` and run it as a pipeline gate before live dependency preflight.

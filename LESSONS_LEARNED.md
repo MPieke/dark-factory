@@ -258,6 +258,18 @@ This file records concrete failure modes seen in this repo and the fixes applied
 - Fix:
   - Resolve Anthropic model dynamically from `/v1/models` when not explicitly configured.
   - Replace fixed `/tmp` artifact names with `mktemp` outputs for safer parallel execution.
+
+## 22) Relative `codex.path` fails when wrapper is missing from workdir
+- Symptom:
+  - Implement/fix stage failed with `fork/exec .../.factory/bin/codex: no such file or directory`.
+- Root cause:
+  - Pipeline configured `codex.path=".factory/bin/codex"` but wrapper did not exist in source `--workdir`, so it was absent in copied run workspace.
+- Fix:
+  - Added explicit `ensure_codex_wrapper` tool stage to create `.factory/bin/codex` before Codex nodes run.
+  - Added fail-fast executable validation in Codex adapter with clear error text for missing/non-executable `codex.path`.
+- Prevention (test/check/guardrail):
+  - For relative `codex.path`, include a bootstrap stage or pre-create wrapper in workdir.
+  - Keep unit coverage for missing executable error path.
 - Prevention (test/check/guardrail):
   - Avoid hardcoded live model defaults in scenario scripts.
   - Require scenario scripts to use dynamic provider model discovery or explicit env override.

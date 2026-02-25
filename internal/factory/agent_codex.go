@@ -48,7 +48,7 @@ func (a codexAgent) Run(req AgentRequest) (AgentResponse, error) {
 		return AgentResponse{}, err
 	}
 	if a.opts.StrictReadScope {
-		scopeBlocked, err := strictReadScopeBlockedPaths(req.Workspace, a.opts.Workdir, a.opts.AddDirs)
+		scopeBlocked, err := strictReadScopeBlockedPaths(req.Workspace, a.opts.Workdir, a.opts.AddDirs, a.opts.Executable)
 		if err != nil {
 			_ = restoreWorkspacePaths(hiddenPaths)
 			return AgentResponse{}, err
@@ -74,6 +74,10 @@ func (a codexAgent) Run(req AgentRequest) (AgentResponse, error) {
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(a.opts.TimeoutSeconds)*time.Second)
 	}
 	defer cancel()
+
+	if err := validateConfiguredExecutable(a.opts.Executable); err != nil {
+		return AgentResponse{}, err
+	}
 
 	cmd := exec.CommandContext(ctx, a.opts.Executable, args...)
 	cmd.Stdin = strings.NewReader(req.Prompt + "\n\nReturn only JSON matching the provided schema.")
@@ -178,6 +182,32 @@ func (a codexAgent) Run(req AgentRequest) (AgentResponse, error) {
 	return parsed, nil
 }
 
+func validateConfiguredExecutable(executable string) error {
+	if strings.TrimSpace(executable) == "" {
+		return nil
+	}
+	if !strings.Contains(executable, "/") {
+		return nil
+	}
+	info, err := os.Stat(executable)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf(
+				"configured codex executable not found: %s (set codex.path to an existing executable or create it before running)",
+				executable,
+			)
+		}
+		return fmt.Errorf("failed to stat configured codex executable %s: %w", executable, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("configured codex executable is a directory: %s", executable)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		return fmt.Errorf("configured codex executable is not executable: %s", executable)
+	}
+	return nil
+}
+
 type hiddenPath struct {
 	original string
 	hidden   string
@@ -248,7 +278,7 @@ func restoreWorkspacePaths(hidden []hiddenPath) error {
 	return nil
 }
 
-func strictReadScopeBlockedPaths(workspace, workdir string, addDirs []string) ([]string, error) {
+func strictReadScopeBlockedPaths(workspace, workdir string, addDirs []string, executable string) ([]string, error) {
 	keepRoots := map[string]bool{}
 	addKeepRoot := func(abs string) {
 		rel, err := filepath.Rel(workspace, abs)
@@ -268,6 +298,7 @@ func strictReadScopeBlockedPaths(workspace, workdir string, addDirs []string) ([
 	for _, d := range addDirs {
 		addKeepRoot(d)
 	}
+	addKeepRoot(executable)
 	if len(keepRoots) == 0 {
 		return nil, nil
 	}

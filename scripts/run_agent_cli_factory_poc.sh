@@ -18,6 +18,7 @@ cp scripts/scenarios/agent_cli_user_scenarios.sh "$WORK/scripts/scenarios/agent_
 cp scripts/scenarios/lint_scenarios.sh "$WORK/scripts/scenarios/lint_scenarios.sh"
 cp scripts/scenarios/preflight_scenario.sh "$WORK/scripts/scenarios/preflight_scenario.sh"
 cp scripts/scenarios/preflight_provider_live.sh "$WORK/scripts/scenarios/preflight_provider_live.sh"
+cp scripts/codex-wrapper.sh "$WORK/scripts/codex-wrapper.sh"
 chmod +x "$WORK/scripts/scenarios/agent_cli_component_checks.sh" "$WORK/scripts/scenarios/agent_cli_user_scenarios.sh" "$WORK/scripts/scenarios/lint_scenarios.sh" "$WORK/scripts/scenarios/preflight_scenario.sh" "$WORK/scripts/scenarios/preflight_provider_live.sh"
 if [ -f "$ROOT/.env" ]; then
   cp "$ROOT/.env" "$WORK/.env"
@@ -42,11 +43,7 @@ func main() {
 }
 EOF
 
-cat > "$WORK/.factory/bin/codex" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-exec codex -c "mcp_servers.memory_ops.enabled=false" "$@"
-EOF
+cp "$WORK/scripts/codex-wrapper.sh" "$WORK/.factory/bin/codex"
 chmod +x "$WORK/.factory/bin/codex"
 
 echo "POC workspace: $TMP"

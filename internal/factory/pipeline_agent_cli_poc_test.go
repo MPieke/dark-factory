@@ -41,6 +41,10 @@ SCENARIO_SCRIPT="${1:-}"
 APP_DIR="${2:-agent}"
 bash "$SCENARIO_SCRIPT" "$APP_DIR"
 `)
+	writeFile(t, filepath.Join(workdir, "scripts/codex-wrapper.sh"), `#!/usr/bin/env bash
+set -euo pipefail
+exec codex -c "mcp_servers.memory_ops.enabled=false" "$@"
+`)
 }
 
 func buildAgentCliPocDOT(planJSON string) string {
@@ -60,6 +64,13 @@ func buildAgentCliPocDOT(planJSON string) string {
     type=tool,
     allowed_write_paths="agent/",
     tool_command="mkdir -p agent"
+  ];
+
+  ensure_codex_wrapper [
+    shape=parallelogram,
+    type=tool,
+    allowed_write_paths=".factory/bin/",
+    tool_command="mkdir -p .factory/bin && cp scripts/codex-wrapper.sh .factory/bin/codex && chmod +x .factory/bin/codex"
   ];
 
   implement [
@@ -96,8 +107,10 @@ func buildAgentCliPocDOT(planJSON string) string {
   start -> preflight_live_deps;
   preflight_live_deps -> ensure_agent_dir [condition="outcome=success"];
   preflight_live_deps -> exit_config_fail [condition="outcome=fail"];
-  ensure_agent_dir -> implement [condition="outcome=success"];
+  ensure_agent_dir -> ensure_codex_wrapper [condition="outcome=success"];
   ensure_agent_dir -> exit_config_fail [condition="outcome=fail"];
+  ensure_codex_wrapper -> implement [condition="outcome=success"];
+  ensure_codex_wrapper -> exit_config_fail [condition="outcome=fail"];
   implement -> verify_plan [condition="outcome=success"];
   implement -> fix [condition="outcome=fail"];
   verify_plan -> validate_component [condition="outcome=success"];

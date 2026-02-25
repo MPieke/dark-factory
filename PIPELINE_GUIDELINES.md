@@ -94,6 +94,13 @@ Scenario script reliability rules:
 
 Example:
 ```dot
+ensure_codex_wrapper [
+  shape=parallelogram,
+  type=tool,
+  allowed_write_paths=".factory/bin/",
+  tool_command="mkdir -p .factory/bin && cp scripts/codex-wrapper.sh .factory/bin/codex && chmod +x .factory/bin/codex"
+];
+
 implement [
   shape=box,
   agent.backend="codex",
@@ -106,6 +113,8 @@ implement [
   prompt="Read ../examples/specs/my_spec.md.\nDo not read scenario scripts.\nUse GOCACHE=\"$PWD/.gocache\" for go commands.\n"
 ];
 ```
+
+If `codex.path` is workspace-relative, bootstrap it before agent stages. Otherwise the run fails with missing executable.
 
 ## Prompt formatting rules
 - Use one quoted string for `prompt`.

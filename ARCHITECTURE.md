@@ -142,3 +142,4 @@ Per-run directory (`<runsdir>/<run-id>/`):
 - Engine excludes `.git` during copy.
 - File modes are preserved during workspace copy (including executable bits).
 - If `--runsdir` is nested under `--workdir` (for example `workdir/.runs`), the nested runs path is automatically excluded from copy to prevent recursive self-copy loops.
+- Pipelines that set a workspace-relative `codex.path` (for example `.factory/bin/codex`) must ensure that file exists in `--workdir` before run start (or create it in an earlier tool stage) so it is present in the copied workspace.
