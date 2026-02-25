@@ -97,6 +97,8 @@ Example:
 implement [
   shape=box,
   agent.backend="codex",
+  codex.path=".factory/bin/codex",
+  codex.disable_mcp=true,
   codex.workdir="agent",
   codex.add_dirs="examples/specs",
   codex.strict_read_scope=true,

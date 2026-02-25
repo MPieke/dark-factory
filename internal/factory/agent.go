@@ -32,6 +32,7 @@ type Agent interface {
 }
 
 type CodexOptions struct {
+	Executable          string
 	SandboxMode          string
 	ApprovalPolicy       string
 	Workdir              string
@@ -47,6 +48,7 @@ type CodexOptions struct {
 	AutoApproveConfigKey string
 	SkipGitRepoCheck     bool
 	DangerousBypass      bool
+	DisableMCP           bool
 }
 
 func ResolveAgent(node *Node, workspace string) (Agent, error) {
@@ -93,6 +95,7 @@ func (stubAgent) Run(_ AgentRequest) (AgentResponse, error) {
 
 func codexOptionsFromNodeAndEnv(node *Node, workspace string) (CodexOptions, error) {
 	opts := CodexOptions{
+		Executable:    pickString(node.StringAttr("codex.path", ""), os.Getenv("ATTRACTOR_CODEX_PATH"), "codex"),
 		SandboxMode:    pickString(node.StringAttr("codex.sandbox", ""), os.Getenv("ATTRACTOR_CODEX_SANDBOX"), "workspace-write"),
 		ApprovalPolicy: pickString(node.StringAttr("codex.approval", ""), os.Getenv("ATTRACTOR_CODEX_APPROVAL"), ""),
 		Workdir:        pickString(node.StringAttr("codex.workdir", ""), os.Getenv("ATTRACTOR_CODEX_WORKDIR"), ""),
@@ -108,6 +111,7 @@ func codexOptionsFromNodeAndEnv(node *Node, workspace string) (CodexOptions, err
 	opts.DangerousBypass = node.BoolAttr("codex.dangerous_bypass", false) || parseBoolEnv("ATTRACTOR_CODEX_DANGEROUS_BYPASS")
 	opts.SkipGitRepoCheck = node.BoolAttr("codex.skip_git_repo_check", false) || parseBoolEnv("ATTRACTOR_CODEX_SKIP_GIT_REPO_CHECK")
 	opts.StrictReadScope = node.BoolAttr("codex.strict_read_scope", false) || parseBoolEnv("ATTRACTOR_CODEX_STRICT_READ_SCOPE")
+	opts.DisableMCP = node.BoolAttr("codex.disable_mcp", false) || parseBoolEnv("ATTRACTOR_CODEX_DISABLE_MCP")
 	opts.AddDirs = pickList(node.StringAttr("codex.add_dirs", ""), os.Getenv("ATTRACTOR_CODEX_ADD_DIRS"))
 	opts.ConfigOverrides = pickConfigOverrides(node.StringAttr("codex.config_overrides", ""), os.Getenv("ATTRACTOR_CODEX_CONFIG_OVERRIDES"))
 	opts.AutoApproveCommands = pickList(node.StringAttr("codex.auto_approve_commands", ""), os.Getenv("ATTRACTOR_CODEX_AUTO_APPROVE_COMMANDS"))
@@ -124,6 +128,12 @@ func codexOptionsFromNodeAndEnv(node *Node, workspace string) (CodexOptions, err
 	}
 	opts.BlockReadPaths = validatedBlocked
 
+	exe, err := resolveExecutable(workspace, opts.Executable)
+	if err != nil {
+		return CodexOptions{}, err
+	}
+	opts.Executable = exe
+
 	wd, err := resolveDir(workspace, opts.Workdir)
 	if err != nil {
 		return CodexOptions{}, err
@@ -139,6 +149,26 @@ func codexOptionsFromNodeAndEnv(node *Node, workspace string) (CodexOptions, err
 	}
 	opts.AddDirs = resolved
 	return opts, nil
+}
+
+func resolveExecutable(workspace, executable string) (string, error) {
+	executable = strings.TrimSpace(executable)
+	if executable == "" {
+		return "codex", nil
+	}
+	if filepath.IsAbs(executable) {
+		return filepath.Clean(executable), nil
+	}
+	if !strings.Contains(executable, "/") {
+		return executable, nil
+	}
+	clean := filepath.Clean(executable)
+	for _, seg := range strings.Split(filepath.ToSlash(clean), "/") {
+		if seg == ".." {
+			return "", fmt.Errorf("codex executable path %q contains parent segment", executable)
+		}
+	}
+	return filepath.Join(workspace, clean), nil
 }
 
 func validateRelativePaths(paths []string) ([]string, error) {

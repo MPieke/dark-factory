@@ -10,6 +10,7 @@ TMP="$(mktemp -d)"
 WORK="$TMP/work"
 RUNS="$TMP/runs"
 mkdir -p "$WORK/agent" "$WORK/examples/specs" "$WORK/scripts/scenarios" "$RUNS"
+mkdir -p "$WORK/.factory/bin"
 
 cp examples/specs/agent_cli_poc_spec.md "$WORK/examples/specs/agent_cli_poc_spec.md"
 cp scripts/scenarios/agent_cli_component_checks.sh "$WORK/scripts/scenarios/agent_cli_component_checks.sh"
@@ -41,9 +42,18 @@ func main() {
 }
 EOF
 
+cat > "$WORK/.factory/bin/codex" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+exec codex -c "mcp_servers.memory_ops.enabled=false" "$@"
+EOF
+chmod +x "$WORK/.factory/bin/codex"
+
 echo "POC workspace: $TMP"
 echo "Running layer (1)+(2): dark-factory + codex backend"
 ATTRACTOR_AGENT_BACKEND=codex \
+ATTRACTOR_CODEX_PATH=".factory/bin/codex" \
+ATTRACTOR_CODEX_DISABLE_MCP=true \
 ATTRACTOR_CODEX_SANDBOX=workspace-write \
 ATTRACTOR_CODEX_APPROVAL=never \
 ATTRACTOR_CODEX_SKIP_GIT_REPO_CHECK=true \

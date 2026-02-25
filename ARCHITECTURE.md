@@ -120,6 +120,8 @@ Per-run directory (`<runsdir>/<run-id>/`):
   - `stub` (default)
   - `codex` (CLI-driven)
 - Codex backend configuration supports sandbox mode, approval policy, working dir, additional dirs, and raw `-c key=value` overrides.
+- Codex backend executable path is configurable (`codex.path` / `ATTRACTOR_CODEX_PATH`), including workspace-relative wrapper paths.
+- Codex MCP can be disabled per-node/env (`codex.disable_mcp` / `ATTRACTOR_CODEX_DISABLE_MCP`), which injects `-c mcp_servers.memory_ops.enabled=false`.
 - Codex backend read isolation:
   - by default, `scripts/scenarios/` is hidden from Codex nodes during execution.
   - this prevents builder agents from reading holdout scenario validators.
@@ -138,4 +140,5 @@ Per-run directory (`<runsdir>/<run-id>/`):
 ## Workspace copy rules
 - Run workspace is copied from `--workdir` into `<runsdir>/<run-id>/workspace`.
 - Engine excludes `.git` during copy.
+- File modes are preserved during workspace copy (including executable bits).
 - If `--runsdir` is nested under `--workdir` (for example `workdir/.runs`), the nested runs path is automatically excluded from copy to prevent recursive self-copy loops.

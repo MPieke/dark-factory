@@ -75,7 +75,7 @@ func (a codexAgent) Run(req AgentRequest) (AgentResponse, error) {
 	}
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "codex", args...)
+	cmd := exec.CommandContext(ctx, a.opts.Executable, args...)
 	cmd.Stdin = strings.NewReader(req.Prompt + "\n\nReturn only JSON matching the provided schema.")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -100,6 +100,7 @@ func (a codexAgent) Run(req AgentRequest) (AgentResponse, error) {
 	defer stderrFile.Close()
 	logger.Info("codex exec started",
 		"node", req.NodeID,
+		"executable", a.opts.Executable,
 		"workdir", a.opts.Workdir,
 		"model", a.opts.Model,
 		"sandbox", a.opts.SandboxMode,
@@ -372,6 +373,9 @@ func buildCodexExecArgs(opts CodexOptions, schemaPath, outputPath string) ([]str
 	for _, override := range opts.ConfigOverrides {
 		args = append(args, "-c", override)
 	}
+	if opts.DisableMCP && !containsConfigOverride(opts.ConfigOverrides, "mcp_servers.memory_ops.enabled") {
+		args = append(args, "-c", "mcp_servers.memory_ops.enabled=false")
+	}
 	if len(opts.AutoApproveCommands) > 0 {
 		if strings.TrimSpace(opts.AutoApproveConfigKey) == "" {
 			return nil, fmt.Errorf("codex.auto_approve_commands requires codex.auto_approve_config_key")
@@ -393,6 +397,21 @@ func buildCodexExecArgs(opts CodexOptions, schemaPath, outputPath string) ([]str
 	}
 	args = append(args, "--color", "never", "--output-schema", schemaPath, "-o", outputPath, "-")
 	return args, nil
+}
+
+func containsConfigOverride(overrides []string, key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false
+	}
+	prefix := key + "="
+	for _, o := range overrides {
+		o = strings.TrimSpace(o)
+		if strings.HasPrefix(o, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func toTOMLArray(values []string) string {

@@ -27,6 +27,8 @@ digraph AgentCliFactoryPOC {
   implement [
     shape=box,
     agent.backend="codex",
+    codex.path=".factory/bin/codex",
+    codex.disable_mcp=true,
     codex.sandbox="workspace-write",
     codex.approval="never",
     codex.workdir="agent",
@@ -61,6 +63,8 @@ digraph AgentCliFactoryPOC {
   fix [
     shape=box,
     agent.backend="codex",
+    codex.path=".factory/bin/codex",
+    codex.disable_mcp=true,
     codex.sandbox="workspace-write",
     codex.approval="never",
     codex.workdir="agent",

@@ -297,3 +297,27 @@ This file records concrete failure modes seen in this repo and the fixes applied
 - Prevention (test/check/guardrail):
   - Keep classification patterns up to date with provider error signatures.
   - Add tests for infra/product classification behavior.
+
+## 25) Global Codex MCP memory can leak guidance into factory runs
+- Symptom:
+  - Codex in pipeline runs attempted to search for repo memory docs despite builder prompts not requesting them.
+- Root cause:
+  - Codex subprocess inherited global MCP server config from `~/.codex/config.toml`.
+- Fix:
+  - Added local executable path support (`codex.path`) and MCP disable switch (`codex.disable_mcp`).
+  - Factory now supports wrapper-based Codex invocation with MCP disabled for isolated runs.
+- Prevention (test/check/guardrail):
+  - Use local Codex wrapper path + `codex.disable_mcp=true` for factory pipelines.
+  - Keep MCP-off behavior covered by unit tests in agent option/arg construction.
+
+## 26) Local tool wrappers fail if workspace copy strips executable bits
+- Symptom:
+  - Codex stage failed with `permission denied` when using `codex.path` wrapper inside workspace.
+- Root cause:
+  - `copyDir` wrote copied files with fixed `0644`, removing executable bits.
+- Fix:
+  - Preserve source file permissions during workspace copy.
+  - Added test coverage for executable-bit preservation.
+- Prevention (test/check/guardrail):
+  - Keep file-mode preservation in workspace-copy tests.
+  - Include at least one e2e run using local executable path wrappers.

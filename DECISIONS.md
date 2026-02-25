@@ -287,3 +287,20 @@ Decision:
 Why:
 - Distinguishes external dependency failures from application behavior failures.
 - Improves diagnostics and enables deterministic routing policy in future graphs.
+
+## 26) Factory Codex runs should support local executable path and MCP-off mode
+Decision:
+- Added `codex.path` / `ATTRACTOR_CODEX_PATH` to select the Codex executable path (supports workspace-relative wrapper paths).
+- Added `codex.disable_mcp` / `ATTRACTOR_CODEX_DISABLE_MCP` to force `mcp_servers.memory_ops.enabled=false`.
+
+Why:
+- Prevents context leakage from user-global Codex MCP memory servers in factory-managed runs.
+- Allows deterministic local wrapper execution without editing user-global `~/.codex/config.toml`.
+
+## 27) Workspace copy must preserve executable bit
+Decision:
+- `copyDir` now preserves source file permissions instead of forcing `0644`.
+
+Why:
+- Local tool wrappers (for example `codex.path=.factory/bin/codex`) require executable permissions in run workspaces.
+- Stripping execute bits caused runtime `permission denied` failures unrelated to pipeline logic.
