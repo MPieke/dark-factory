@@ -261,3 +261,14 @@ This file records concrete failure modes seen in this repo and the fixes applied
 - Prevention (test/check/guardrail):
   - Avoid hardcoded live model defaults in scenario scripts.
   - Require scenario scripts to use dynamic provider model discovery or explicit env override.
+
+## 22) Scenario bugs need fail-fast lint, not runtime discovery
+- Symptom:
+  - Scenario incompatibilities were discovered only after long implement/fix cycles.
+- Root cause:
+  - No hard preflight guardrail validating scenario-script contracts before pipeline execution.
+- Fix:
+  - Added `lint_scenarios.sh` and wired it as the first pipeline gate.
+  - Added tests for linter pass/fail behavior.
+- Prevention (test/check/guardrail):
+  - Keep scenario lint as required preflight for scenario-driven pipelines.

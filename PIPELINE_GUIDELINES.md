@@ -114,7 +114,7 @@ prompt="Line 1\nLine 2\nLine 3\n"
 
 ## Recommended authoring workflow
 1. Start with a minimal linear pipeline.
-2. Add a test node that validates success criteria.
+2. Add a scenario lint gate (`bash scripts/scenarios/lint_scenarios.sh ...`) before runtime validators.
 3. Add a fix loop for `outcome=fail`.
 4. Add write guardrails (`allowed_write_paths`).
 5. Run with fake backend first for deterministic flow checks.

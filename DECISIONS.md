@@ -258,3 +258,14 @@ Why:
 - Provider model availability varies by account/region and changes over time.
 - Hardcoded model ids caused repeated false-negative scenario failures.
 - Fixed temp filenames create cross-run interference risk.
+
+## 23) Scenario lint must be a hard preflight guardrail
+Decision:
+- Added `scripts/scenarios/lint_scenarios.sh` and run it as a pipeline gate before live dependency preflight.
+- Lint failures are treated as config failures (`exit_config_fail`) rather than fix-loop inputs.
+
+Why:
+- Scenario infrastructure bugs should fail fast before agent implementation/fix cycles consume time and tokens.
+- Prevents known classes of failures from reaching runtime:
+  - hardcoded live provider model defaults
+  - fixed `/tmp` artifact paths

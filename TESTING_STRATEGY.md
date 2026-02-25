@@ -38,6 +38,7 @@ This repo uses a spec-first, test-first approach with automation as the default 
   - Full `RunPipeline` flows and run artifact verification
   - Smoke validation through `scripts/smoke.sh`
   - Verification command allowlist smoke through `scripts/smoke_verification_allowlist.sh`
+  - Scenario guardrail lint checks through `scripts/scenarios/lint_scenarios.sh`
 
 ## Anti-reward-hacking guardrails
 - Never “test only the happy path” when adding capabilities.

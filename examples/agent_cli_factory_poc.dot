@@ -5,6 +5,12 @@ digraph AgentCliFactoryPOC {
   exit [shape=Msquare];
   exit_config_fail [shape=Msquare];
 
+  lint_scenarios [
+    shape=parallelogram,
+    type=tool,
+    tool_command="bash scripts/scenarios/lint_scenarios.sh scripts/scenarios"
+  ];
+
   preflight_live_deps [
     shape=parallelogram,
     type=tool,
@@ -67,7 +73,9 @@ digraph AgentCliFactoryPOC {
     prompt="Validation failed.\n\nFix this directory (agent/) so validations pass.\nRead ../examples/specs/agent_cli_builder_spec.md.\nDo not read or rely on scenario scripts.\nDo not rely on orchestrator/pipeline metadata.\nReturn strict JSON and include verification_plan.\nUse GOCACHE=\"$PWD/.gocache\" for go commands."
   ];
 
-  start -> preflight_live_deps;
+  start -> lint_scenarios;
+  lint_scenarios -> preflight_live_deps [condition="outcome=success"];
+  lint_scenarios -> exit_config_fail [condition="outcome=fail"];
   preflight_live_deps -> ensure_agent_dir [condition="outcome=success"];
   preflight_live_deps -> exit_config_fail [condition="outcome=fail"];
   ensure_agent_dir -> implement [condition="outcome=success"];
