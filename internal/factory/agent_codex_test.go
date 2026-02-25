@@ -91,9 +91,12 @@ func TestStrictReadScopeBlockedPaths(t *testing.T) {
 	}
 	mustMkdir("agent")
 	mustMkdir("examples/specs")
+	mustMkdir("examples/other")
 	mustMkdir("scripts/scenarios")
 	mustMkdir(".factory/bin")
 	mustWrite("README.md")
+	mustWrite("examples/specs/spec.md")
+	mustWrite("examples/other/secret.md")
 
 	blocked, err := strictReadScopeBlockedPaths(
 		workspace,
@@ -107,8 +110,11 @@ func TestStrictReadScopeBlockedPaths(t *testing.T) {
 	if slices.Contains(blocked, "agent/") {
 		t.Fatalf("agent should not be blocked: %+v", blocked)
 	}
-	if slices.Contains(blocked, "examples/") {
-		t.Fatalf("examples should not be blocked: %+v", blocked)
+	if slices.Contains(blocked, "examples/specs/") {
+		t.Fatalf("examples/specs should not be blocked: %+v", blocked)
+	}
+	if !slices.Contains(blocked, "examples/other/") {
+		t.Fatalf("examples/other should be blocked: %+v", blocked)
 	}
 	if slices.Contains(blocked, ".factory/") {
 		t.Fatalf(".factory should not be blocked when executable is under it: %+v", blocked)
@@ -129,10 +135,10 @@ func TestCodexRunMissingExecutableHasClearError(t *testing.T) {
 	}
 	missing := filepath.Join(workspace, ".factory", "bin", "codex")
 	agent := codexAgent{opts: CodexOptions{
-		Executable:   missing,
-		SandboxMode:  "workspace-write",
-		Workdir:      workspace,
-		DisableMCP:   true,
+		Executable:     missing,
+		SandboxMode:    "workspace-write",
+		Workdir:        workspace,
+		DisableMCP:     true,
 		TimeoutSeconds: 1,
 	}}
 

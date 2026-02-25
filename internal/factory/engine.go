@@ -315,15 +315,15 @@ func (e *Engine) logFailureContext(node *Node, nodeDir string) {
 func (e *Engine) captureFailureFeedback(node *Node, nodeDir string, out Outcome) {
 	artifacts := map[string]string{}
 	candidates := map[string]string{
-		"status":              filepath.Join(nodeDir, "status.json"),
-		"tool_stdout":         filepath.Join(nodeDir, "tool.stdout.txt"),
-		"tool_stderr":         filepath.Join(nodeDir, "tool.stderr.txt"),
-		"tool_exitcode":       filepath.Join(nodeDir, "tool.exitcode.txt"),
+		"status":               filepath.Join(nodeDir, "status.json"),
+		"tool_stdout":          filepath.Join(nodeDir, "tool.stdout.txt"),
+		"tool_stderr":          filepath.Join(nodeDir, "tool.stderr.txt"),
+		"tool_exitcode":        filepath.Join(nodeDir, "tool.exitcode.txt"),
 		"verification_results": filepath.Join(nodeDir, "verification.results.json"),
-		"verification_plan":   filepath.Join(nodeDir, "verification.plan.json"),
-		"codex_stdout":        filepath.Join(nodeDir, "codex.stdout.log"),
-		"codex_stderr":        filepath.Join(nodeDir, "codex.stderr.log"),
-		"codex_response":      filepath.Join(nodeDir, "response.md"),
+		"verification_plan":    filepath.Join(nodeDir, "verification.plan.json"),
+		"codex_stdout":         filepath.Join(nodeDir, "codex.stdout.log"),
+		"codex_stderr":         filepath.Join(nodeDir, "codex.stderr.log"),
+		"codex_response":       filepath.Join(nodeDir, "response.md"),
 	}
 	for key, p := range candidates {
 		if _, err := os.Stat(p); err == nil {
@@ -678,6 +678,7 @@ func (codergenHandler) Execute(node *Node, ctx Context, g *Graph, nodeDir string
 		prompt = strings.ReplaceAll(prompt, "$goal", fmt.Sprintf("%v", goal))
 	}
 	prompt = injectFailureFeedbackPrompt(prompt, ctx)
+	prompt = injectVerificationAllowlistPrompt(prompt, node, g)
 	if writeErr := os.WriteFile(filepath.Join(nodeDir, "prompt.md"), []byte(prompt+"\n"), 0o644); writeErr != nil {
 		return Outcome{}, writeErr
 	}
@@ -767,6 +768,80 @@ func injectFailureFeedbackPrompt(prompt string, ctx Context) string {
 	b.WriteString(summary)
 	b.WriteString("\n")
 	return b.String()
+}
+
+func injectVerificationAllowlistPrompt(prompt string, node *Node, g *Graph) string {
+	allowed := verificationAllowedCommandsForNode(node, g)
+	if len(allowed) == 0 {
+		return prompt
+	}
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(prompt, "\n"))
+	b.WriteString("\n\nVerification plan command allowlist (hard requirement):\n")
+	for _, cmd := range allowed {
+		b.WriteString("- ")
+		b.WriteString(cmd)
+		b.WriteString("\n")
+	}
+	b.WriteString("Use only these command families in verification_plan.commands.\n")
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func verificationAllowedCommandsForNode(node *Node, g *Graph) []string {
+	if v := uniqueNonEmpty(splitCSV(node.StringAttr("verification.allowed_commands", ""))); len(v) > 0 {
+		return v
+	}
+	seen := map[string]bool{}
+	queue := []string{node.ID}
+	visited := map[string]bool{}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if visited[cur] {
+			continue
+		}
+		visited[cur] = true
+		if cur != node.ID {
+			n := g.Nodes[cur]
+			if n != nil && n.Type() == "verification" {
+				for _, cmd := range splitCSV(n.StringAttr("verification.allowed_commands", "")) {
+					cmd = strings.TrimSpace(cmd)
+					if cmd != "" {
+						seen[cmd] = true
+					}
+				}
+				continue
+			}
+		}
+		for _, e := range g.Edges {
+			if e.From == cur {
+				queue = append(queue, e.To)
+			}
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(seen))
+	for cmd := range seen {
+		out = append(out, cmd)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func uniqueNonEmpty(items []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	return out
 }
 
 func outcomeFromTestAttrs(node *Node, ctx Context) string {

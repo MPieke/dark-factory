@@ -270,6 +270,29 @@ This file records concrete failure modes seen in this repo and the fixes applied
 - Prevention (test/check/guardrail):
   - For relative `codex.path`, include a bootstrap stage or pre-create wrapper in workdir.
   - Keep unit coverage for missing executable error path.
+
+## 23) Verification allowlist could be bypassed via shell chaining
+- Symptom:
+  - Commands like `go test ./...; <extra>` could satisfy prefix allowlist intent and still execute additional shell actions.
+- Root cause:
+  - Verification executed commands through `sh -c`; allowlist checked only the command prefix.
+- Fix:
+  - Verification now rejects unsafe shell syntax (`;`, `&&`, `||`, pipes, redirects, subshell markers).
+  - Verification now executes parsed commands directly (with controlled leading env assignments), not via `sh -c`.
+- Prevention (test/check/guardrail):
+  - Keep negative tests for shell-chain rejection.
+  - Keep end-to-end negative run proving unsafe verification commands fail.
+
+## 24) Strict read scope leaked sibling paths under allowed roots
+- Symptom:
+  - With `codex.add_dirs="examples/specs"`, Codex could still read other files under `examples/`.
+- Root cause:
+  - Strict read scope originally preserved top-level roots, not exact allowlisted subpaths.
+- Fix:
+  - Strict scope now hides non-allowlisted subpaths recursively; only explicit path prefixes remain readable.
+- Prevention (test/check/guardrail):
+  - Keep tests that assert `examples/specs` is readable while `examples/other` is blocked.
+  - Keep executable path (`codex.path`) explicitly included in strict-scope keep set.
 - Prevention (test/check/guardrail):
   - Avoid hardcoded live model defaults in scenario scripts.
   - Require scenario scripts to use dynamic provider model discovery or explicit env override.

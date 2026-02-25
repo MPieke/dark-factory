@@ -549,6 +549,72 @@ func TestFixPromptIncludesFailureFeedback(t *testing.T) {
 	}
 }
 
+func TestCodergenPromptIncludesDownstreamVerificationAllowlist(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	implement [shape=box, prompt="Build feature."];
+	verify [
+		shape=parallelogram,
+		type=verification,
+		"verification.allowed_commands"="go test,go build,gofmt"
+	];
+	exit [shape=Msquare];
+	start -> implement;
+	implement -> verify;
+	verify -> exit [condition="outcome=success"];
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r20b"}); err == nil {
+		t.Fatal("expected verify failure due missing plan")
+	}
+	promptBytes, err := os.ReadFile(filepath.Join(runsdir, "r20b", "implement", "prompt.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := string(promptBytes)
+	if !strings.Contains(prompt, "Verification plan command allowlist") {
+		t.Fatalf("expected allowlist section in prompt: %s", prompt)
+	}
+	for _, cmd := range []string{"go test", "go build", "gofmt"} {
+		if !strings.Contains(prompt, cmd) {
+			t.Fatalf("expected %q in prompt: %s", cmd, prompt)
+		}
+	}
+}
+
+func TestCodergenPromptUsesNodeVerificationAllowlistOverride(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	implement [shape=box, prompt="Build feature.", "verification.allowed_commands"="go test"];
+	verify [
+		shape=parallelogram,
+		type=verification,
+		"verification.allowed_commands"="go build,gofmt"
+	];
+	exit [shape=Msquare];
+	start -> implement;
+	implement -> verify;
+	verify -> exit [condition="outcome=success"];
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r20c"}); err == nil {
+		t.Fatal("expected verify failure due missing plan")
+	}
+	promptBytes, err := os.ReadFile(filepath.Join(runsdir, "r20c", "implement", "prompt.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := string(promptBytes)
+	if !strings.Contains(prompt, "- go test") {
+		t.Fatalf("expected node override allowlist in prompt: %s", prompt)
+	}
+	if strings.Contains(prompt, "go build") || strings.Contains(prompt, "gofmt") {
+		t.Fatalf("expected downstream allowlist to be ignored when node override set: %s", prompt)
+	}
+}
+
 func TestFixNodeFailsFastWhenFailureSourceOutsideWriteScope(t *testing.T) {
 	t.Setenv("ATTRACTION_BACKEND", "fake")
 	dot := `digraph G {

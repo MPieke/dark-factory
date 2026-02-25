@@ -74,6 +74,8 @@ Verification stage behavior (`type=verification`):
 - Reads a structured verification plan from context (default key: `verification.plan`).
 - Plan includes required files and commands.
 - Enforces per-node command prefix allowlist (`verification.allowed_commands`).
+- Rejects unsafe shell syntax in verification commands (`;`, `&&`, `||`, pipes, redirects, subshell markers).
+- Executes verification commands directly (not via `sh -c`) with controlled leading env-assignment support.
 - Executes commands from workspace root by default, or from `verification.workdir` when configured.
 - Writes `verification.plan.json` and `verification.results.json`.
 
@@ -84,6 +86,7 @@ Scenario validation contract:
 - Shared runner `scripts/scenarios/preflight_scenario.sh` enforces this sequence.
 - On stage failure, engine stores structured feedback in context (`last_failure.*`) from stage artifacts (reason, stderr/stdout tails, and artifact paths).
 - Codergen nodes automatically append a `Failure feedback` section to the prompt when `last_failure.summary` exists.
+- Codergen nodes also append verification command policy when available (from node-level `verification.allowed_commands` or downstream verification nodes), so agents generate compliant `verification_plan.commands`.
 
 ## Artifacts
 Per-run directory (`<runsdir>/<run-id>/`):
@@ -125,7 +128,7 @@ Per-run directory (`<runsdir>/<run-id>/`):
 - Codex backend read isolation:
   - by default, `scripts/scenarios/` is hidden from Codex nodes during execution.
   - this prevents builder agents from reading holdout scenario validators.
-  - optional strict scope mode (`codex.strict_read_scope`) hides all workspace entries except `codex.workdir` + `codex.add_dirs` during execution.
+  - optional strict scope mode (`codex.strict_read_scope`) hides all workspace paths except explicit allowed prefixes (`codex.workdir`, `codex.add_dirs`, and configured executable path).
   - configurable via:
     - `codex.block_read_paths` / `ATTRACTOR_CODEX_BLOCK_READ_PATHS`
     - `codex.allow_read_scenarios=true` (opt-out of default scenario hide)

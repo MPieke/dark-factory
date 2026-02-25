@@ -36,6 +36,7 @@ Think of it as a small state machine:
   - reads plan from context key `verification.plan` by default
   - optional `verification.workdir` to run verification commands from a relative subdirectory
   - requires `verification.allowed_commands="prefix1,prefix2,..."`
+  - verification commands must avoid shell chaining syntax (`;`, `&&`, `||`, `|`, redirects, subshell markers)
 - Codergen node (agent-driven):
   - default for `shape=box` (or `type=codergen`)
   - uses `prompt="..."`
@@ -75,6 +76,7 @@ Practical implication:
   - set `codex.strict_read_scope=true` to hard-enforce read scope to workdir + add_dirs
   - keep scenario scripts executed only by tool/verification nodes
 - Keep prompts aligned with this policy (avoid "read scenario scripts" instructions).
+- Set `verification.allowed_commands` on codergen nodes when possible so command policy is injected into prompts before generation.
 - Only opt out intentionally:
   - `codex.allow_read_scenarios=true`
   - or custom blocked paths with `codex.block_read_paths`.
@@ -109,6 +111,7 @@ implement [
   codex.workdir="agent",
   codex.add_dirs="examples/specs",
   codex.strict_read_scope=true,
+  "verification.allowed_commands"="go test,go build,gofmt,bash scripts/scenarios/preflight_scenario.sh",
   allowed_write_paths="agent/",
   prompt="Read ../examples/specs/my_spec.md.\nDo not read scenario scripts.\nUse GOCACHE=\"$PWD/.gocache\" for go commands.\n"
 ];

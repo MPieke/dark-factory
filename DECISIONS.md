@@ -197,12 +197,13 @@ Why:
 Decision:
 - Verification allowlist matching now normalizes commands before prefix checks:
   - strips leading env assignments (for example `GOCACHE=...`)
-  - strips leading `cd ... &&` and `export ... &&` wrappers
   - trims wrapping parentheses
+- Verification rejects unsafe shell syntax (`;`, `&&`, `||`, pipes, redirects, subshell markers).
+- Verification executes commands directly rather than through `sh -c`.
 
 Why:
-- Keeps allowlist policy focused on effective command intent (`go test`, `go build`) instead of fragile shell wrappers.
-- Reduces false-negative verification failures while preserving command-prefix guardrails.
+- Keeps allowlist policy focused on command intent (`go test`, `go build`) while removing shell-chaining bypass risk.
+- Reduces command-injection surface in verification nodes.
 
 ## 18) Builder prompts must avoid orchestrator metadata
 Decision:
@@ -314,3 +315,26 @@ Decision:
 Why:
 - Local tool wrappers (for example `codex.path=.factory/bin/codex`) require executable permissions in run workspaces.
 - Stripping execute bits caused runtime `permission denied` failures unrelated to pipeline logic.
+
+## 28) Strict read scope must be path-precise, not root-precise
+Decision:
+- `codex.strict_read_scope` now preserves only exact allowed path prefixes:
+  - `codex.workdir`
+  - `codex.add_dirs`
+  - configured executable path (`codex.path`)
+- Non-allowed subpaths under shared roots are hidden (for example `examples/other` when only `examples/specs` is allowed).
+
+Why:
+- Root-level scoping leaked unrelated files under allowed roots and weakened holdout isolation.
+- Path-precise scoping enforces least privilege more reliably.
+
+## 29) Pass verification allowlist to codergen prompts before generation
+Decision:
+- Codergen prompt assembly now injects verification command policy before agent execution.
+- Allowlist source priority:
+  - node-level `verification.allowed_commands` on the codergen node
+  - otherwise, union of downstream verification-node allowlists
+
+Why:
+- Reduces avoidable `verify_plan` failures caused by agents proposing disallowed commands.
+- Moves policy enforcement earlier in the loop while keeping runtime verification as the final gate.

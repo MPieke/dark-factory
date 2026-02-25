@@ -36,11 +36,14 @@ This repo uses a spec-first, test-first approach with automation as the default 
   - Guardrail enforcement
   - Failure-feedback propagation (`last_failure.*` context + fix prompt injection)
   - Unfixable-scope guardrail (`unfixable_failure_source`) behavior
+  - Strict read-scope precision (allowlisted subpath remains readable while sibling paths are blocked)
+  - Verification command parser behavior (env-assignment handling and unsafe-syntax rejection)
 - End-to-end tests:
   - Full `RunPipeline` flows and run artifact verification
   - Smoke validation through `scripts/smoke.sh`
   - Verification command allowlist smoke through `scripts/smoke_verification_allowlist.sh`
   - Scenario guardrail lint checks through `scripts/scenarios/lint_scenarios.sh`
+  - Negative verification-security run proving shell-chained commands are rejected
 
 ## Anti-reward-hacking guardrails
 - Never “test only the happy path” when adding capabilities.

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -108,8 +109,19 @@ func (verificationHandler) Execute(node *Node, ctx Context, _ *Graph, nodeDir st
 				FailureReason:    fmt.Sprintf("verification command not allowed: %s", command),
 			}, nil
 		}
-		cmd := exec.Command("sh", "-c", command)
+		parsed, err := parseVerificationCommand(command, workingDir)
+		if err != nil {
+			return Outcome{
+				SchemaVersion:    1,
+				Outcome:          "fail",
+				SuggestedNextIDs: []string{},
+				ContextUpdates:   map[string]any{},
+				FailureReason:    err.Error(),
+			}, nil
+		}
+		cmd := exec.Command(parsed.Name, parsed.Args...)
 		cmd.Dir = workingDir
+		cmd.Env = append(os.Environ(), parsed.Env...)
 		stdout, _ := cmd.StdoutPipe()
 		stderr, _ := cmd.StderrPipe()
 		if err := cmd.Start(); err != nil {
@@ -117,13 +129,13 @@ func (verificationHandler) Execute(node *Node, ctx Context, _ *Graph, nodeDir st
 		}
 		outB, _ := io.ReadAll(stdout)
 		errB, _ := io.ReadAll(stderr)
-		err := cmd.Wait()
+		waitErr := cmd.Wait()
 		exitCode := 0
-		if err != nil {
-			if ee, ok := err.(*exec.ExitError); ok {
+		if waitErr != nil {
+			if ee, ok := waitErr.(*exec.ExitError); ok {
 				exitCode = ee.ExitCode()
 			} else {
-				return Outcome{}, err
+				return Outcome{}, waitErr
 			}
 		}
 		results.Commands = append(results.Commands, verificationCommandResult{
@@ -186,6 +198,9 @@ func resolveVerificationWorkdir(workspace, configured string) (string, error) {
 }
 
 func commandAllowed(command string, allowedPrefixes []string) bool {
+	if hasUnsafeShellSyntax(command) {
+		return false
+	}
 	cmd := normalizeCommandForAllowlist(command)
 	for _, p := range allowedPrefixes {
 		p = strings.TrimSpace(p)
@@ -196,6 +211,68 @@ func commandAllowed(command string, allowedPrefixes []string) bool {
 			return true
 		}
 		if strings.HasPrefix(cmd, p+" ") {
+			return true
+		}
+	}
+	return false
+}
+
+type parsedVerificationCommand struct {
+	Env  []string
+	Name string
+	Args []string
+}
+
+func parseVerificationCommand(command, workingDir string) (parsedVerificationCommand, error) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return parsedVerificationCommand{}, fmt.Errorf("verification command cannot be empty")
+	}
+	if hasUnsafeShellSyntax(command) {
+		return parsedVerificationCommand{}, fmt.Errorf("verification command rejected: contains unsafe shell syntax")
+	}
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return parsedVerificationCommand{}, fmt.Errorf("verification command cannot be empty")
+	}
+	parsed := parsedVerificationCommand{}
+	i := 0
+	for i < len(fields) && isEnvAssignmentToken(fields[i]) {
+		eq := strings.IndexByte(fields[i], '=')
+		key := fields[i][:eq]
+		val := expandVerificationEnvValue(fields[i][eq+1:], workingDir)
+		parsed.Env = append(parsed.Env, key+"="+val)
+		i++
+	}
+	if i >= len(fields) {
+		return parsedVerificationCommand{}, fmt.Errorf("verification command missing executable")
+	}
+	parsed.Name = fields[i]
+	parsed.Args = append([]string{}, fields[i+1:]...)
+	return parsed, nil
+}
+
+func expandVerificationEnvValue(raw, workingDir string) string {
+	raw = strings.TrimSpace(raw)
+	if len(raw) >= 2 {
+		if (raw[0] == '"' && raw[len(raw)-1] == '"') || (raw[0] == '\'' && raw[len(raw)-1] == '\'') {
+			if unquoted, err := strconv.Unquote(raw); err == nil {
+				raw = unquoted
+			} else {
+				raw = raw[1 : len(raw)-1]
+			}
+		}
+	}
+	raw = strings.ReplaceAll(raw, "$PWD", workingDir)
+	raw = strings.ReplaceAll(raw, "${PWD}", workingDir)
+	return raw
+}
+
+func hasUnsafeShellSyntax(command string) bool {
+	command = strings.TrimSpace(command)
+	unsafe := []string{"&&", "||", ";", "|", "`", "$(", ">", "<", "\n", "\r"}
+	for _, token := range unsafe {
+		if strings.Contains(command, token) {
 			return true
 		}
 	}

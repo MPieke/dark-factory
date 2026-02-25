@@ -279,8 +279,8 @@ func restoreWorkspacePaths(hidden []hiddenPath) error {
 }
 
 func strictReadScopeBlockedPaths(workspace, workdir string, addDirs []string, executable string) ([]string, error) {
-	keepRoots := map[string]bool{}
-	addKeepRoot := func(abs string) {
+	keepPrefixes := map[string]bool{}
+	addKeepPrefix := func(abs string) {
 		rel, err := filepath.Rel(workspace, abs)
 		if err != nil {
 			return
@@ -289,34 +289,74 @@ func strictReadScopeBlockedPaths(workspace, workdir string, addDirs []string, ex
 		if rel == "." || strings.HasPrefix(rel, "../") {
 			return
 		}
-		root := strings.Split(rel, "/")[0]
-		if root != "" && root != "." {
-			keepRoots[root] = true
+		for _, seg := range strings.Split(rel, "/") {
+			if seg == ".." {
+				return
+			}
+		}
+		if rel != "" && rel != "." {
+			keepPrefixes[rel] = true
 		}
 	}
-	addKeepRoot(workdir)
+	addKeepPrefix(workdir)
 	for _, d := range addDirs {
-		addKeepRoot(d)
+		addKeepPrefix(d)
 	}
-	addKeepRoot(executable)
-	if len(keepRoots) == 0 {
+	addKeepPrefix(executable)
+	if len(keepPrefixes) == 0 {
 		return nil, nil
 	}
-	entries, err := os.ReadDir(workspace)
-	if err != nil {
+	hasKeepUnder := func(rel string) bool {
+		rel = filepath.ToSlash(filepath.Clean(rel))
+		if rel == "." {
+			return true
+		}
+		for keep := range keepPrefixes {
+			if keep == rel || strings.HasPrefix(keep, rel+"/") || strings.HasPrefix(rel, keep+"/") {
+				return true
+			}
+		}
+		return false
+	}
+
+	blockedSet := map[string]bool{}
+	var walk func(string) error
+	walk = func(rel string) error {
+		abs := filepath.Join(workspace, filepath.FromSlash(rel))
+		entries, err := os.ReadDir(abs)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			childRel := filepath.ToSlash(filepath.Join(rel, entry.Name()))
+			if rel == "." {
+				childRel = filepath.ToSlash(entry.Name())
+			}
+			if !hasKeepUnder(childRel) {
+				if entry.IsDir() {
+					blockedSet[childRel+"/"] = true
+				} else {
+					blockedSet[childRel] = true
+				}
+				continue
+			}
+			if entry.IsDir() {
+				if err := walk(childRel); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := walk("."); err != nil {
 		return nil, err
 	}
-	blocked := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		name := entry.Name()
-		if keepRoots[name] {
-			continue
+
+	blocked := make([]string, 0, len(blockedSet))
+	for path := range blockedSet {
+		if path != "." && path != "./" {
+			blocked = append(blocked, path)
 		}
-		if entry.IsDir() {
-			blocked = append(blocked, name+"/")
-			continue
-		}
-		blocked = append(blocked, name)
 	}
 	sort.Strings(blocked)
 	return blocked, nil
