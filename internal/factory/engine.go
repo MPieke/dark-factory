@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,15 +67,21 @@ type Engine struct {
 	Context    Context
 	RetryCount map[string]int
 	Completed  map[string]bool
+	Logger     *slog.Logger
 }
 
 func RunPipeline(cfg RunConfig) error {
+	logger := newFactoryLogger()
+	slog.SetDefault(logger)
+	logger.Info("pipeline starting", "pipeline_path", cfg.PipelinePath, "workdir", cfg.Workdir, "runsdir", cfg.Runsdir, "resume", cfg.Resume)
 	b, err := os.ReadFile(cfg.PipelinePath)
 	if err != nil {
+		logger.Error("failed to read pipeline", "error", err)
 		return err
 	}
 	g, err := ParseDOT(string(b))
 	if err != nil {
+		logger.Error("failed to parse pipeline", "error", err)
 		return err
 	}
 	diags := ValidateGraph(g)
@@ -85,11 +92,13 @@ func RunPipeline(cfg RunConfig) error {
 				msgs = append(msgs, d.Message)
 			}
 		}
+		logger.Error("pipeline validation failed", "errors", strings.Join(msgs, "; "))
 		return fmt.Errorf("validation failed: %s", strings.Join(msgs, "; "))
 	}
 
 	if cfg.Resume {
 		if cfg.RunID == "" {
+			logger.Error("resume requested without run-id")
 			return fmt.Errorf("--run-id required with --resume")
 		}
 	} else if cfg.RunID == "" {
@@ -101,9 +110,16 @@ func RunPipeline(cfg RunConfig) error {
 	if cfg.Resume {
 	} else {
 		if err := os.MkdirAll(workspace, 0o755); err != nil {
+			logger.Error("failed to create workspace", "workspace", workspace, "error", err)
 			return err
 		}
-		if err := copyDir(cfg.Workdir, workspace); err != nil {
+		excludes := []string{".git"}
+		if relRuns, ok := relativeDescendant(cfg.Workdir, cfg.Runsdir); ok {
+			excludes = append(excludes, relRuns)
+			logger.Info("excluding runsdir from workspace copy", "relative_path", relRuns)
+		}
+		if err := copyDir(cfg.Workdir, workspace, excludes); err != nil {
+			logger.Error("failed to copy workdir into workspace", "error", err)
 			return err
 		}
 	}
@@ -114,6 +130,7 @@ func RunPipeline(cfg RunConfig) error {
 		return err
 	}
 	if err := writeManifest(g, cfg, runDir, workspace); err != nil {
+		logger.Error("failed to write manifest", "error", err)
 		return err
 	}
 	_ = appendTrace(runDir, "SessionInitialized", map[string]any{
@@ -124,7 +141,7 @@ func RunPipeline(cfg RunConfig) error {
 		"resume":        cfg.Resume,
 	})
 
-	e := &Engine{Graph: g, RunID: cfg.RunID, RunDir: runDir, Workspace: workspace, Context: Context{}, RetryCount: map[string]int{}, Completed: map[string]bool{}}
+	e := &Engine{Graph: g, RunID: cfg.RunID, RunDir: runDir, Workspace: workspace, Context: Context{}, RetryCount: map[string]int{}, Completed: map[string]bool{}, Logger: logger}
 	if goal, ok := g.Attrs["goal"]; ok {
 		e.Context["graph.goal"] = goal
 	}
@@ -162,13 +179,16 @@ func RunPipeline(cfg RunConfig) error {
 
 	_ = appendEvent(runDir, map[string]any{"schema_version": 1, "type": "PipelineStarted", "run_id": cfg.RunID, "at": time.Now().UTC().Format(time.RFC3339Nano)})
 	_ = appendTrace(runDir, "PipelineStarted", map[string]any{"run_id": cfg.RunID, "start_node": startID})
+	logger.Info("pipeline execution started", "run_id", cfg.RunID, "run_dir", runDir, "workspace", workspace, "start_node", startID)
 	if err := e.executeFrom(startID); err != nil {
 		_ = appendEvent(runDir, map[string]any{"schema_version": 1, "type": "PipelineFailed", "error": err.Error(), "at": time.Now().UTC().Format(time.RFC3339Nano)})
 		_ = appendTrace(runDir, "PipelineFailed", map[string]any{"error": err.Error()})
+		logger.Error("pipeline failed", "run_id", cfg.RunID, "error", err)
 		return err
 	}
 	_ = appendEvent(runDir, map[string]any{"schema_version": 1, "type": "PipelineCompleted", "at": time.Now().UTC().Format(time.RFC3339Nano)})
 	_ = appendTrace(runDir, "PipelineCompleted", map[string]any{})
+	logger.Info("pipeline completed", "run_id", cfg.RunID)
 	return nil
 }
 
@@ -184,6 +204,7 @@ func (e *Engine) executeFrom(startID string) error {
 			return err
 		}
 		_ = appendEvent(e.RunDir, map[string]any{"schema_version": 1, "type": "StageStarted", "node_id": node.ID, "at": time.Now().UTC().Format(time.RFC3339Nano)})
+		e.Logger.Info("stage started", "node", node.ID, "type", node.Type(), "shape", node.Shape())
 		contextBefore := cloneContext(e.Context)
 		_ = appendTrace(e.RunDir, "NodeInputCaptured", map[string]any{
 			"node_id":           node.ID,
@@ -199,6 +220,8 @@ func (e *Engine) executeFrom(startID string) error {
 		if err != nil {
 			_ = appendEvent(e.RunDir, map[string]any{"schema_version": 1, "type": "StageFailed", "node_id": node.ID, "error": err.Error(), "at": time.Now().UTC().Format(time.RFC3339Nano)})
 			_ = appendTrace(e.RunDir, "NodeExecutionErrored", map[string]any{"node_id": node.ID, "error": err.Error()})
+			e.Logger.Error("stage execution errored", "node", node.ID, "error", err)
+			e.logFailureContext(node, nodeDir)
 			return err
 		}
 		if err := writeJSON(filepath.Join(nodeDir, "status.json"), out); err != nil {
@@ -206,11 +229,17 @@ func (e *Engine) executeFrom(startID string) error {
 		}
 		if out.Outcome == "fail" {
 			_ = appendEvent(e.RunDir, map[string]any{"schema_version": 1, "type": "StageFailed", "node_id": node.ID, "failure_reason": out.FailureReason, "at": time.Now().UTC().Format(time.RFC3339Nano)})
+			e.Logger.Warn("stage failed", "node", node.ID, "reason", out.FailureReason)
+			e.logFailureContext(node, nodeDir)
 		} else {
 			_ = appendEvent(e.RunDir, map[string]any{"schema_version": 1, "type": "StageCompleted", "node_id": node.ID, "outcome": out.Outcome, "at": time.Now().UTC().Format(time.RFC3339Nano)})
+			e.Logger.Info("stage completed", "node", node.ID, "outcome", out.Outcome)
 		}
 		for k, v := range out.ContextUpdates {
 			e.Context[k] = v
+		}
+		if out.Outcome == "fail" {
+			e.captureFailureFeedback(node, nodeDir, out)
 		}
 		e.Context["outcome"] = out.Outcome
 		contextAfter := cloneContext(e.Context)
@@ -240,6 +269,7 @@ func (e *Engine) executeFrom(startID string) error {
 			"next_node":  next,
 			"candidates": routeCandidates(e.Graph, node.ID, out.Outcome),
 		})
+		e.Logger.Info("route selected", "from_node", node.ID, "outcome", out.Outcome, "next_node", next)
 		if next == "" {
 			return fmt.Errorf("no route from node %s for outcome %s", node.ID, out.Outcome)
 		}
@@ -247,13 +277,126 @@ func (e *Engine) executeFrom(startID string) error {
 	}
 }
 
+func (e *Engine) logFailureContext(node *Node, nodeDir string) {
+	paths := map[string]string{
+		"status_path":            filepath.Join(nodeDir, "status.json"),
+		"tool_stdout_path":       filepath.Join(nodeDir, "tool.stdout.txt"),
+		"tool_stderr_path":       filepath.Join(nodeDir, "tool.stderr.txt"),
+		"tool_exitcode_path":     filepath.Join(nodeDir, "tool.exitcode.txt"),
+		"verification_results":   filepath.Join(nodeDir, "verification.results.json"),
+		"verification_plan_path": filepath.Join(nodeDir, "verification.plan.json"),
+		"codex_stdout_path":      filepath.Join(nodeDir, "codex.stdout.log"),
+		"codex_stderr_path":      filepath.Join(nodeDir, "codex.stderr.log"),
+		"codex_response_path":    filepath.Join(nodeDir, "response.md"),
+		"workspace_diff_path":    filepath.Join(nodeDir, "workspace.diff.json"),
+	}
+	attrs := []any{"node", node.ID}
+	for key, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			attrs = append(attrs, key, p)
+		}
+	}
+	e.Logger.Warn("failure artifacts", attrs...)
+
+	if tail, ok := readTailSnippet(filepath.Join(nodeDir, "tool.stderr.txt"), 600); ok {
+		e.Logger.Warn("failure detail", "node", node.ID, "source", "tool.stderr.txt", "snippet", tail)
+	}
+	if tail, ok := readTailSnippet(filepath.Join(nodeDir, "tool.stdout.txt"), 600); ok {
+		e.Logger.Warn("failure detail", "node", node.ID, "source", "tool.stdout.txt", "snippet", tail)
+	}
+	if tail, ok := readTailSnippet(filepath.Join(nodeDir, "codex.stderr.log"), 600); ok {
+		e.Logger.Warn("failure detail", "node", node.ID, "source", "codex.stderr.log", "snippet", tail)
+	}
+	if tail, ok := readTailSnippet(filepath.Join(nodeDir, "response.md"), 600); ok {
+		e.Logger.Warn("failure detail", "node", node.ID, "source", "response.md", "snippet", tail)
+	}
+}
+
+func (e *Engine) captureFailureFeedback(node *Node, nodeDir string, out Outcome) {
+	artifacts := map[string]string{}
+	candidates := map[string]string{
+		"status":               filepath.Join(nodeDir, "status.json"),
+		"tool_stdout":          filepath.Join(nodeDir, "tool.stdout.txt"),
+		"tool_stderr":          filepath.Join(nodeDir, "tool.stderr.txt"),
+		"tool_exitcode":        filepath.Join(nodeDir, "tool.exitcode.txt"),
+		"verification_results": filepath.Join(nodeDir, "verification.results.json"),
+		"verification_plan":    filepath.Join(nodeDir, "verification.plan.json"),
+		"codex_stdout":         filepath.Join(nodeDir, "codex.stdout.log"),
+		"codex_stderr":         filepath.Join(nodeDir, "codex.stderr.log"),
+		"codex_response":       filepath.Join(nodeDir, "response.md"),
+	}
+	for key, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			artifacts[key] = p
+		}
+	}
+	e.Context["last_failure.node_id"] = node.ID
+	e.Context["last_failure.node_type"] = node.Type()
+	e.Context["last_failure.reason"] = out.FailureReason
+	e.Context["last_failure.at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	e.Context["last_failure.artifacts"] = artifacts
+	e.Context["last_failure.summary"] = buildFailureSummary(node, nodeDir, out)
+}
+
+func buildFailureSummary(node *Node, nodeDir string, out Outcome) string {
+	parts := []string{
+		fmt.Sprintf("failed_node=%s", node.ID),
+		fmt.Sprintf("failed_node_type=%s", node.Type()),
+	}
+	if strings.TrimSpace(out.FailureReason) != "" {
+		parts = append(parts, fmt.Sprintf("failure_reason=%s", out.FailureReason))
+	}
+	if code, ok := readTailSnippet(filepath.Join(nodeDir, "tool.exitcode.txt"), 64); ok {
+		parts = append(parts, fmt.Sprintf("tool_exit_code=%s", strings.TrimSpace(code)))
+	}
+	if s, ok := readTailSnippet(filepath.Join(nodeDir, "tool.stderr.txt"), 600); ok {
+		parts = append(parts, "tool_stderr:\n"+s)
+	}
+	if s, ok := readTailSnippet(filepath.Join(nodeDir, "tool.stdout.txt"), 300); ok {
+		parts = append(parts, "tool_stdout:\n"+s)
+	}
+	if s, ok := readTailSnippet(filepath.Join(nodeDir, "verification.results.json"), 600); ok {
+		parts = append(parts, "verification_results_tail:\n"+s)
+	}
+	if s, ok := readTailSnippet(filepath.Join(nodeDir, "codex.stderr.log"), 600); ok {
+		parts = append(parts, "codex_stderr_tail:\n"+s)
+	}
+	summary := strings.Join(parts, "\n")
+	if len(summary) > 2200 {
+		summary = summary[:2200]
+	}
+	return strings.TrimSpace(summary)
+}
+
+func readTailSnippet(path string, max int) (string, bool) {
+	b, err := os.ReadFile(path)
+	if err != nil || len(b) == 0 {
+		return "", false
+	}
+	if max <= 0 {
+		max = 600
+	}
+	if len(b) > max {
+		b = b[len(b)-max:]
+	}
+	s := strings.TrimSpace(string(b))
+	if s == "" {
+		return "", false
+	}
+	return s, true
+}
+
 func (e *Engine) executeNode(node *Node, nodeDir string) (Outcome, error) {
+	if reason, blocked := e.unfixableFailureSourceReason(node); blocked {
+		return Outcome{}, fmt.Errorf("%s", reason)
+	}
 	h := resolveHandler(node)
 	maxRetries := node.IntAttr("max_retries", 0)
 	allowPartial := node.BoolAttr("allow_partial", false)
 	attempts := maxRetries + 1
 	var out Outcome
 	for attempt := 0; attempt < attempts; attempt++ {
+		e.Logger.Debug("node attempt", "node", node.ID, "attempt", attempt+1, "max_attempts", attempts)
 		before, err := snapshotWorkspace(e.Workspace)
 		if err != nil {
 			return Outcome{}, err
@@ -305,6 +448,7 @@ func (e *Engine) executeNode(node *Node, nodeDir string) (Outcome, error) {
 			e.RetryCount[node.ID] = e.RetryCount[node.ID] + 1
 			e.Context["internal.retry_count."+node.ID] = e.RetryCount[node.ID]
 			_ = appendEvent(e.RunDir, map[string]any{"schema_version": 1, "type": "StageRetrying", "node_id": node.ID, "retry_count": e.RetryCount[node.ID], "at": time.Now().UTC().Format(time.RFC3339Nano)})
+			e.Logger.Warn("stage requested retry", "node", node.ID, "retry_count", e.RetryCount[node.ID])
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
@@ -321,6 +465,72 @@ func (e *Engine) executeNode(node *Node, nodeDir string) (Outcome, error) {
 		return out, nil
 	}
 	return out, nil
+}
+
+func (e *Engine) unfixableFailureSourceReason(node *Node) (string, bool) {
+	if !isCodergenNode(node) {
+		return "", false
+	}
+	failedNodeID, _ := e.Context["last_failure.node_id"].(string)
+	failedNodeID = strings.TrimSpace(failedNodeID)
+	if failedNodeID == "" {
+		return "", false
+	}
+	failedNode := e.Graph.Nodes[failedNodeID]
+	if failedNode == nil || failedNode.Type() != "tool" {
+		return "", false
+	}
+	cmd := strings.TrimSpace(failedNode.StringAttr("tool_command", ""))
+	if cmd == "" {
+		return "", false
+	}
+	sourcePaths := extractToolScriptPaths(cmd)
+	if len(sourcePaths) == 0 {
+		return "", false
+	}
+	allowed, err := ParseAllowedWritePaths(node)
+	if err != nil {
+		return fmt.Sprintf("invalid allowed_write_paths on node %s: %v", node.ID, err), true
+	}
+	if len(allowed) == 0 {
+		return "", false
+	}
+	normalized := make([]string, 0, len(allowed))
+	for _, p := range allowed {
+		p = filepath.ToSlash(strings.TrimSpace(p))
+		if p != "" {
+			normalized = append(normalized, p)
+		}
+	}
+	outside := []string{}
+	for _, src := range sourcePaths {
+		if !pathAllowed(src, normalized) {
+			outside = append(outside, src)
+		}
+	}
+	if len(outside) == 0 {
+		return "", false
+	}
+	sort.Strings(outside)
+	return fmt.Sprintf("unfixable_failure_source: failed node %s references %s outside allowed_write_paths for %s", failedNodeID, strings.Join(outside, ","), node.ID), true
+}
+
+func extractToolScriptPaths(cmd string) []string {
+	tokens := strings.Fields(cmd)
+	paths := []string{}
+	for _, tok := range tokens {
+		t := strings.Trim(tok, `"'`)
+		if t == "" || strings.HasPrefix(t, "-") {
+			continue
+		}
+		if strings.Contains(t, "=") {
+			continue
+		}
+		if strings.HasSuffix(t, ".sh") {
+			paths = append(paths, filepath.ToSlash(filepath.Clean(t)))
+		}
+	}
+	return paths
 }
 
 func (e *Engine) writeCheckpoint(last string) error {
@@ -467,6 +677,8 @@ func (codergenHandler) Execute(node *Node, ctx Context, g *Graph, nodeDir string
 	if goal, ok := g.Attrs["goal"]; ok {
 		prompt = strings.ReplaceAll(prompt, "$goal", fmt.Sprintf("%v", goal))
 	}
+	prompt = injectFailureFeedbackPrompt(prompt, ctx)
+	prompt = injectVerificationAllowlistPrompt(prompt, node, g)
 	if writeErr := os.WriteFile(filepath.Join(nodeDir, "prompt.md"), []byte(prompt+"\n"), 0o644); writeErr != nil {
 		return Outcome{}, writeErr
 	}
@@ -507,6 +719,7 @@ func (codergenHandler) Execute(node *Node, ctx Context, g *Graph, nodeDir string
 		NodeID:    node.ID,
 		NodeDir:   nodeDir,
 		Workspace: workspace,
+		Logger:    slog.Default(),
 	})
 	if err != nil {
 		return Outcome{}, err
@@ -527,6 +740,108 @@ func (codergenHandler) Execute(node *Node, ctx Context, g *Graph, nodeDir string
 		Notes:              resp.Notes,
 		FailureReason:      resp.FailureReason,
 	}, nil
+}
+
+func injectFailureFeedbackPrompt(prompt string, ctx Context) string {
+	summary, _ := ctx["last_failure.summary"].(string)
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return prompt
+	}
+	nodeID, _ := ctx["last_failure.node_id"].(string)
+	reason, _ := ctx["last_failure.reason"].(string)
+
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(prompt, "\n"))
+	b.WriteString("\n\nFailure feedback (from previous failed stage):\n")
+	if strings.TrimSpace(nodeID) != "" {
+		b.WriteString("- failed_node: ")
+		b.WriteString(strings.TrimSpace(nodeID))
+		b.WriteString("\n")
+	}
+	if strings.TrimSpace(reason) != "" {
+		b.WriteString("- failure_reason: ")
+		b.WriteString(strings.TrimSpace(reason))
+		b.WriteString("\n")
+	}
+	b.WriteString("- details:\n")
+	b.WriteString(summary)
+	b.WriteString("\n")
+	return b.String()
+}
+
+func injectVerificationAllowlistPrompt(prompt string, node *Node, g *Graph) string {
+	allowed := verificationAllowedCommandsForNode(node, g)
+	if len(allowed) == 0 {
+		return prompt
+	}
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(prompt, "\n"))
+	b.WriteString("\n\nVerification plan command allowlist (hard requirement):\n")
+	for _, cmd := range allowed {
+		b.WriteString("- ")
+		b.WriteString(cmd)
+		b.WriteString("\n")
+	}
+	b.WriteString("Use only these command families in verification_plan.commands.\n")
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func verificationAllowedCommandsForNode(node *Node, g *Graph) []string {
+	if v := uniqueNonEmpty(splitCSV(node.StringAttr("verification.allowed_commands", ""))); len(v) > 0 {
+		return v
+	}
+	seen := map[string]bool{}
+	queue := []string{node.ID}
+	visited := map[string]bool{}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if visited[cur] {
+			continue
+		}
+		visited[cur] = true
+		if cur != node.ID {
+			n := g.Nodes[cur]
+			if n != nil && n.Type() == "verification" {
+				for _, cmd := range splitCSV(n.StringAttr("verification.allowed_commands", "")) {
+					cmd = strings.TrimSpace(cmd)
+					if cmd != "" {
+						seen[cmd] = true
+					}
+				}
+				continue
+			}
+		}
+		for _, e := range g.Edges {
+			if e.From == cur {
+				queue = append(queue, e.To)
+			}
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(seen))
+	for cmd := range seen {
+		out = append(out, cmd)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func uniqueNonEmpty(items []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	return out
 }
 
 func outcomeFromTestAttrs(node *Node, ctx Context) string {
@@ -569,7 +884,7 @@ func validateToolCommand(cmd string) error {
 	if strings.Contains(cmd, "~") {
 		return fmt.Errorf("tool_command rejected by guardrail: contains ~")
 	}
-	if strings.Contains(cmd, "..") {
+	if containsParentSegmentToken(cmd) {
 		return fmt.Errorf("tool_command rejected by guardrail: contains ..")
 	}
 	tokens := strings.Fields(cmd)
@@ -582,6 +897,29 @@ func validateToolCommand(cmd string) error {
 	return nil
 }
 
+func containsParentSegmentToken(cmd string) bool {
+	for i := 0; i+1 < len(cmd); i++ {
+		if cmd[i] != '.' || cmd[i+1] != '.' {
+			continue
+		}
+		prevBoundary := i == 0 || isPathTokenBoundary(cmd[i-1])
+		nextBoundary := i+2 >= len(cmd) || isPathTokenBoundary(cmd[i+2])
+		if prevBoundary && nextBoundary {
+			return true
+		}
+	}
+	return false
+}
+
+func isPathTokenBoundary(b byte) bool {
+	switch b {
+	case '/', ' ', '\t', '\n', '\r', ';', '&', '|', '(', ')', '\'', '"':
+		return true
+	default:
+		return false
+	}
+}
+
 func isExecutableNode(node *Node) bool {
 	t := node.Type()
 	if t == "" {
@@ -589,6 +927,14 @@ func isExecutableNode(node *Node) bool {
 		return shape == "box" || shape == "parallelogram"
 	}
 	return t == "codergen" || t == "tool"
+}
+
+func isCodergenNode(node *Node) bool {
+	t := node.Type()
+	if t == "" {
+		return node.Shape() == "box"
+	}
+	return t == "codergen"
 }
 
 func snapshotWorkspace(workspace string) (map[string]fileState, error) {
@@ -846,7 +1192,16 @@ func readStatus(path string) (Outcome, error) {
 	return out, err
 }
 
-func copyDir(src, dst string) error {
+func copyDir(src, dst string, excludes []string) error {
+	normExcludes := make([]string, 0, len(excludes))
+	for _, ex := range excludes {
+		ex = strings.TrimSpace(ex)
+		if ex == "" || ex == "." {
+			continue
+		}
+		ex = filepath.ToSlash(filepath.Clean(ex))
+		normExcludes = append(normExcludes, ex)
+	}
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -858,7 +1213,8 @@ func copyDir(src, dst string) error {
 		if rel == "." {
 			return nil
 		}
-		if strings.HasPrefix(rel, ".git") {
+		rel = filepath.ToSlash(rel)
+		if shouldSkipCopyRel(rel, normExcludes) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -872,6 +1228,37 @@ func copyDir(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(target, b, 0o644)
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		mode := info.Mode().Perm()
+		if mode == 0 {
+			mode = 0o644
+		}
+		return os.WriteFile(target, b, mode)
 	})
+}
+
+func shouldSkipCopyRel(rel string, excludes []string) bool {
+	for _, ex := range excludes {
+		if rel == ex || strings.HasPrefix(rel, ex+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func relativeDescendant(parent, child string) (string, bool) {
+	parent = filepath.Clean(parent)
+	child = filepath.Clean(child)
+	rel, err := filepath.Rel(parent, child)
+	if err != nil || rel == "." {
+		return "", false
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", false
+	}
+	return rel, true
 }

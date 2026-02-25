@@ -1,13 +1,20 @@
 package attractor
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 type codexAgent struct {
@@ -15,10 +22,15 @@ type codexAgent struct {
 }
 
 func (a codexAgent) Run(req AgentRequest) (AgentResponse, error) {
+	logger := req.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	schemaPath := filepath.Join(req.NodeDir, "codex.output.schema.json")
 	outputPath := filepath.Join(req.NodeDir, "response.md")
 	stdoutPath := filepath.Join(req.NodeDir, "codex.stdout.log")
 	stderrPath := filepath.Join(req.NodeDir, "codex.stderr.log")
+	argsPath := filepath.Join(req.NodeDir, "codex.args.txt")
 
 	if err := os.WriteFile(schemaPath, []byte(codexOutcomeSchema+"\n"), 0o644); err != nil {
 		return AgentResponse{}, err
@@ -28,7 +40,46 @@ func (a codexAgent) Run(req AgentRequest) (AgentResponse, error) {
 		return AgentResponse{}, err
 	}
 
-	cmd := exec.Command("codex", args...)
+	if err := os.WriteFile(argsPath, []byte(strings.Join(append([]string{"codex"}, args...), " ")+"\n"), 0o644); err != nil {
+		return AgentResponse{}, err
+	}
+	hiddenPaths, err := hideWorkspacePaths(req.Workspace, req.NodeDir, a.opts.BlockReadPaths)
+	if err != nil {
+		return AgentResponse{}, err
+	}
+	if a.opts.StrictReadScope {
+		scopeBlocked, err := strictReadScopeBlockedPaths(req.Workspace, a.opts.Workdir, a.opts.AddDirs, a.opts.Executable)
+		if err != nil {
+			_ = restoreWorkspacePaths(hiddenPaths)
+			return AgentResponse{}, err
+		}
+		if len(scopeBlocked) > 0 {
+			additionalHidden, err := hideWorkspacePaths(req.Workspace, req.NodeDir, scopeBlocked)
+			if err != nil {
+				_ = restoreWorkspacePaths(hiddenPaths)
+				return AgentResponse{}, err
+			}
+			hiddenPaths = append(hiddenPaths, additionalHidden...)
+		}
+	}
+	defer func() {
+		if restoreErr := restoreWorkspacePaths(hiddenPaths); restoreErr != nil {
+			logger.Error("failed to restore hidden paths", "node", req.NodeID, "error", restoreErr)
+		}
+	}()
+
+	ctx := context.Background()
+	cancel := func() {}
+	if a.opts.TimeoutSeconds > 0 {
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(a.opts.TimeoutSeconds)*time.Second)
+	}
+	defer cancel()
+
+	if err := validateConfiguredExecutable(a.opts.Executable); err != nil {
+		return AgentResponse{}, err
+	}
+
+	cmd := exec.CommandContext(ctx, a.opts.Executable, args...)
 	cmd.Stdin = strings.NewReader(req.Prompt + "\n\nReturn only JSON matching the provided schema.")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -41,15 +92,78 @@ func (a codexAgent) Run(req AgentRequest) (AgentResponse, error) {
 	if err := cmd.Start(); err != nil {
 		return AgentResponse{}, err
 	}
-	outB, _ := io.ReadAll(stdout)
-	errB, _ := io.ReadAll(stderr)
-	runErr := cmd.Wait()
+	stdoutFile, err := os.Create(stdoutPath)
+	if err != nil {
+		return AgentResponse{}, err
+	}
+	defer stdoutFile.Close()
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		return AgentResponse{}, err
+	}
+	defer stderrFile.Close()
+	logger.Info("codex exec started",
+		"node", req.NodeID,
+		"executable", a.opts.Executable,
+		"workdir", a.opts.Workdir,
+		"model", a.opts.Model,
+		"sandbox", a.opts.SandboxMode,
+		"approval", a.opts.ApprovalPolicy,
+		"timeout_seconds", a.opts.TimeoutSeconds,
+		"args_path", argsPath,
+		"stdout_log", stdoutPath,
+		"stderr_log", stderrPath,
+	)
 
-	_ = os.WriteFile(stdoutPath, outB, 0o644)
-	_ = os.WriteFile(stderrPath, errB, 0o644)
+	heartbeatDone := make(chan struct{})
+	heartbeatSeconds := a.opts.HeartbeatSeconds
+	if heartbeatSeconds <= 0 {
+		heartbeatSeconds = 15
+	}
+	go func() {
+		t := time.NewTicker(time.Duration(heartbeatSeconds) * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-heartbeatDone:
+				return
+			case <-t.C:
+				logger.Info("codex exec still running", "node", req.NodeID, "heartbeat_seconds", heartbeatSeconds)
+			}
+		}
+	}()
+
+	logStream := parseBool("FACTORY_LOG_CODEX_STREAM", false)
+	var outErr error
+	var errErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		outErr = readAndMaybeLogStream(stdout, stdoutFile, "stdout", req.NodeID, logger, logStream)
+	}()
+	go func() {
+		defer wg.Done()
+		errErr = readAndMaybeLogStream(stderr, stderrFile, "stderr", req.NodeID, logger, logStream)
+	}()
+	runErr := cmd.Wait()
+	wg.Wait()
+	close(heartbeatDone)
+	if outErr != nil {
+		return AgentResponse{}, fmt.Errorf("failed reading codex stdout: %w", outErr)
+	}
+	if errErr != nil {
+		return AgentResponse{}, fmt.Errorf("failed reading codex stderr: %w", errErr)
+	}
 	if runErr != nil {
+		if ctx.Err() != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			logger.Error("codex exec timed out", "node", req.NodeID, "timeout_seconds", a.opts.TimeoutSeconds)
+			return AgentResponse{}, fmt.Errorf("codex exec timeout after %ds", a.opts.TimeoutSeconds)
+		}
+		logger.Error("codex exec failed", "node", req.NodeID, "error", runErr, "stderr_log", stderrPath, "stdout_log", stdoutPath)
 		return AgentResponse{}, fmt.Errorf("codex exec failed: %w", runErr)
 	}
+	logger.Info("codex exec completed", "node", req.NodeID, "stdout_log", stdoutPath, "stderr_log", stderrPath, "response_path", outputPath)
 
 	raw, err := os.ReadFile(outputPath)
 	if err != nil {
@@ -66,6 +180,250 @@ func (a codexAgent) Run(req AgentRequest) (AgentResponse, error) {
 		parsed.ContextUpdates = map[string]any{}
 	}
 	return parsed, nil
+}
+
+func validateConfiguredExecutable(executable string) error {
+	if strings.TrimSpace(executable) == "" {
+		return nil
+	}
+	if !strings.Contains(executable, "/") {
+		return nil
+	}
+	info, err := os.Stat(executable)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf(
+				"configured codex executable not found: %s (set codex.path to an existing executable or create it before running)",
+				executable,
+			)
+		}
+		return fmt.Errorf("failed to stat configured codex executable %s: %w", executable, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("configured codex executable is a directory: %s", executable)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		return fmt.Errorf("configured codex executable is not executable: %s", executable)
+	}
+	return nil
+}
+
+type hiddenPath struct {
+	original string
+	hidden   string
+}
+
+func hideWorkspacePaths(workspace, nodeDir string, blocked []string) ([]hiddenPath, error) {
+	if len(blocked) == 0 {
+		return nil, nil
+	}
+	base, err := os.MkdirTemp(nodeDir, ".hidden_read_paths.")
+	if err != nil {
+		return nil, err
+	}
+	paths := append([]string(nil), blocked...)
+	sort.Strings(paths)
+	hidden := make([]hiddenPath, 0, len(paths))
+	for _, rel := range paths {
+		rel = filepath.ToSlash(strings.TrimSpace(rel))
+		if rel == "" {
+			continue
+		}
+		if strings.HasPrefix(rel, "/") {
+			return nil, fmt.Errorf("blocked read path %q must be relative", rel)
+		}
+		for _, seg := range strings.Split(filepath.Clean(rel), string(filepath.Separator)) {
+			if seg == ".." {
+				return nil, fmt.Errorf("blocked read path %q contains parent segment", rel)
+			}
+		}
+		orig := filepath.Join(workspace, filepath.FromSlash(rel))
+		if _, err := os.Stat(orig); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, err
+		}
+		dst := filepath.Join(base, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return nil, err
+		}
+		if err := os.Rename(orig, dst); err != nil {
+			_ = restoreWorkspacePaths(hidden)
+			return nil, err
+		}
+		hidden = append(hidden, hiddenPath{original: orig, hidden: dst})
+	}
+	return hidden, nil
+}
+
+func restoreWorkspacePaths(hidden []hiddenPath) error {
+	if len(hidden) == 0 {
+		return nil
+	}
+	for i := len(hidden) - 1; i >= 0; i-- {
+		h := hidden[i]
+		if err := os.MkdirAll(filepath.Dir(h.original), 0o755); err != nil {
+			return err
+		}
+		if _, err := os.Stat(h.original); err == nil {
+			return fmt.Errorf("blocked path was recreated during execution: %s", h.original)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := os.Rename(h.hidden, h.original); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func strictReadScopeBlockedPaths(workspace, workdir string, addDirs []string, executable string) ([]string, error) {
+	keepPrefixes := map[string]bool{}
+	addKeepPrefix := func(abs string) {
+		rel, err := filepath.Rel(workspace, abs)
+		if err != nil {
+			return
+		}
+		rel = filepath.ToSlash(filepath.Clean(rel))
+		if rel == "." || strings.HasPrefix(rel, "../") {
+			return
+		}
+		for _, seg := range strings.Split(rel, "/") {
+			if seg == ".." {
+				return
+			}
+		}
+		if rel != "" && rel != "." {
+			keepPrefixes[rel] = true
+		}
+	}
+	addKeepPrefix(workdir)
+	for _, d := range addDirs {
+		addKeepPrefix(d)
+	}
+	addKeepPrefix(executable)
+	if len(keepPrefixes) == 0 {
+		return nil, nil
+	}
+	hasKeepUnder := func(rel string) bool {
+		rel = filepath.ToSlash(filepath.Clean(rel))
+		if rel == "." {
+			return true
+		}
+		for keep := range keepPrefixes {
+			if keep == rel || strings.HasPrefix(keep, rel+"/") || strings.HasPrefix(rel, keep+"/") {
+				return true
+			}
+		}
+		return false
+	}
+
+	blockedSet := map[string]bool{}
+	var walk func(string) error
+	walk = func(rel string) error {
+		abs := filepath.Join(workspace, filepath.FromSlash(rel))
+		entries, err := os.ReadDir(abs)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			childRel := filepath.ToSlash(filepath.Join(rel, entry.Name()))
+			if rel == "." {
+				childRel = filepath.ToSlash(entry.Name())
+			}
+			if !hasKeepUnder(childRel) {
+				if entry.IsDir() {
+					blockedSet[childRel+"/"] = true
+				} else {
+					blockedSet[childRel] = true
+				}
+				continue
+			}
+			if entry.IsDir() {
+				if err := walk(childRel); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := walk("."); err != nil {
+		return nil, err
+	}
+
+	blocked := make([]string, 0, len(blockedSet))
+	for path := range blockedSet {
+		if path != "." && path != "./" {
+			blocked = append(blocked, path)
+		}
+	}
+	sort.Strings(blocked)
+	return blocked, nil
+}
+
+func readAndMaybeLogStream(r io.Reader, sink io.Writer, stream string, nodeID string, logger *slog.Logger, logStream bool) error {
+	buf := make([]byte, 4096)
+	var pending string
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			chunk := string(buf[:n])
+			if _, werr := sink.Write(buf[:n]); werr != nil {
+				return werr
+			}
+			if logStream {
+				pending += chunk
+				lines, rest := splitLogRecords(pending)
+				pending = rest
+				for _, line := range lines {
+					if strings.TrimSpace(line) == "" {
+						continue
+					}
+					logger.Info("codex stream", "node", nodeID, "stream", stream, "line", line)
+				}
+			}
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return err
+		}
+	}
+	if logStream && strings.TrimSpace(pending) != "" {
+		logger.Info("codex stream", "node", nodeID, "stream", stream, "line", strings.TrimSpace(pending))
+	}
+	return nil
+}
+
+func parseBool(key string, def bool) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if v == "" {
+		return def
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return def
+	}
+	return b
+}
+
+func splitLogRecords(s string) ([]string, string) {
+	lines := make([]string, 0, 8)
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' || s[i] == '\r' {
+			if i > start {
+				lines = append(lines, s[start:i])
+			}
+			start = i + 1
+		}
+	}
+	if start >= len(s) {
+		return lines, ""
+	}
+	return lines, s[start:]
 }
 
 func buildCodexExecArgs(opts CodexOptions, schemaPath, outputPath string) ([]string, error) {
@@ -85,6 +443,9 @@ func buildCodexExecArgs(opts CodexOptions, schemaPath, outputPath string) ([]str
 	}
 	for _, override := range opts.ConfigOverrides {
 		args = append(args, "-c", override)
+	}
+	if opts.DisableMCP && !containsConfigOverride(opts.ConfigOverrides, "mcp_servers.memory_ops.enabled") {
+		args = append(args, "-c", "mcp_servers.memory_ops.enabled=false")
 	}
 	if len(opts.AutoApproveCommands) > 0 {
 		if strings.TrimSpace(opts.AutoApproveConfigKey) == "" {
@@ -107,6 +468,21 @@ func buildCodexExecArgs(opts CodexOptions, schemaPath, outputPath string) ([]str
 	}
 	args = append(args, "--color", "never", "--output-schema", schemaPath, "-o", outputPath, "-")
 	return args, nil
+}
+
+func containsConfigOverride(overrides []string, key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false
+	}
+	prefix := key + "="
+	for _, o := range overrides {
+		o = strings.TrimSpace(o)
+		if strings.HasPrefix(o, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func toTOMLArray(values []string) string {

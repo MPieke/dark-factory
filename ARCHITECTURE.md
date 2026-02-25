@@ -23,14 +23,21 @@
   - Semantic validation (start/exit constraints, supported node/edge types, reachability).
 - `internal/factory/engine.go`
   - Runtime orchestration, handler dispatch, retries, guardrails, checkpoint/resume, artifacts.
+- `internal/factory/logging.go`
+  - Structured runtime logger (`slog`) with env-configurable level/format.
 - `internal/factory/agent.go`
   - Agent interface and backend resolution.
 - `internal/factory/agent_codex.go`
-  - Codex CLI adapter implementation.
+  - Codex CLI adapter implementation, timeout/heartbeat behavior, and live stream capture.
 - `internal/factory/verification.go`
   - Deterministic verification handler that executes structured verification plans from context.
 - `internal/factory/verification_plan.go`
   - Verification plan schema/parsing and safe relative-path normalization.
+- `scripts/scenarios/preflight_scenario.sh`
+  - Shared scenario harness that runs deterministic `selftest` checks and optional `live` checks.
+  - Classifies live failures as `infra` or `product` and emits `failure_class=...` for diagnostics.
+- `scripts/scenarios/lint_scenarios.sh`
+  - Scenario guardrail linter for contract and portability violations (hardcoded live model defaults, fixed `/tmp` files).
 
 ## Data model
 - Graph:
@@ -61,12 +68,25 @@ Stage loop behavior:
 - Merge `context_updates` into run context.
 - Write checkpoint.
 - Select next edge based on conditional match (`condition="outcome=..."`), else unconditional; tie-break by highest `weight`.
+- For codergen stages, runtime can stop early with an `unfixable_failure_source` error when the previous failed tool stage references script paths outside current `allowed_write_paths`.
 
 Verification stage behavior (`type=verification`):
 - Reads a structured verification plan from context (default key: `verification.plan`).
 - Plan includes required files and commands.
 - Enforces per-node command prefix allowlist (`verification.allowed_commands`).
+- Rejects unsafe shell syntax in verification commands (`;`, `&&`, `||`, pipes, redirects, subshell markers).
+- Executes verification commands directly (not via `sh -c`) with controlled leading env-assignment support.
+- Executes commands from workspace root by default, or from `verification.workdir` when configured.
 - Writes `verification.plan.json` and `verification.results.json`.
+
+Scenario validation contract:
+- Scenario scripts support `SCENARIO_MODE=selftest|live`.
+- `selftest` mode must be deterministic and succeed unless the scenario logic is broken.
+- `live` mode validates real integrations (provider/API/network) when enabled.
+- Shared runner `scripts/scenarios/preflight_scenario.sh` enforces this sequence.
+- On stage failure, engine stores structured feedback in context (`last_failure.*`) from stage artifacts (reason, stderr/stdout tails, and artifact paths).
+- Codergen nodes automatically append a `Failure feedback` section to the prompt when `last_failure.summary` exists.
+- Codergen nodes also append verification command policy when available (from node-level `verification.allowed_commands` or downstream verification nodes), so agents generate compliant `verification_plan.commands`.
 
 ## Artifacts
 Per-run directory (`<runsdir>/<run-id>/`):
@@ -79,6 +99,7 @@ Per-run directory (`<runsdir>/<run-id>/`):
   - `status.json`
   - `workspace.diff.json`
   - `prompt.md` and `response.md` (codergen)
+  - `codex.args.txt`, `codex.stdout.log`, `codex.stderr.log` (codex backend)
   - `tool.stdout.txt`, `tool.stderr.txt`, `tool.exitcode.txt` (tool)
   - `verification.plan.json`, `verification.results.json` (verification)
 
@@ -102,4 +123,26 @@ Per-run directory (`<runsdir>/<run-id>/`):
   - `stub` (default)
   - `codex` (CLI-driven)
 - Codex backend configuration supports sandbox mode, approval policy, working dir, additional dirs, and raw `-c key=value` overrides.
+- Codex backend executable path is configurable (`codex.path` / `ATTRACTOR_CODEX_PATH`), including workspace-relative wrapper paths.
+- Codex MCP can be disabled per-node/env (`codex.disable_mcp` / `ATTRACTOR_CODEX_DISABLE_MCP`), which injects `-c mcp_servers.memory_ops.enabled=false`.
+- Codex backend read isolation:
+  - by default, `scripts/scenarios/` is hidden from Codex nodes during execution.
+  - this prevents builder agents from reading holdout scenario validators.
+  - optional strict scope mode (`codex.strict_read_scope`) hides all workspace paths except explicit allowed prefixes (`codex.workdir`, `codex.add_dirs`, and configured executable path).
+  - configurable via:
+    - `codex.block_read_paths` / `ATTRACTOR_CODEX_BLOCK_READ_PATHS`
+    - `codex.allow_read_scenarios=true` (opt-out of default scenario hide)
+- Codex backend supports execution controls:
+  - `codex.timeout_seconds` / `ATTRACTOR_CODEX_TIMEOUT_SECONDS`
+  - `codex.heartbeat_seconds` / `ATTRACTOR_CODEX_HEARTBEAT_SECONDS`
+- Codex stream visibility:
+  - `FACTORY_LOG_CODEX_STREAM=1` enables live stdout/stderr line logging to the factory logger.
+  - stdout/stderr are also written incrementally to per-node files while the process is running.
 - Codex responses can optionally include a structured `verification_plan` object; engine stores it in context for verification nodes.
+
+## Workspace copy rules
+- Run workspace is copied from `--workdir` into `<runsdir>/<run-id>/workspace`.
+- Engine excludes `.git` during copy.
+- File modes are preserved during workspace copy (including executable bits).
+- If `--runsdir` is nested under `--workdir` (for example `workdir/.runs`), the nested runs path is automatically excluded from copy to prevent recursive self-copy loops.
+- Pipelines that set a workspace-relative `codex.path` (for example `.factory/bin/codex`) must ensure that file exists in `--workdir` before run start (or create it in an earlier tool stage) so it is present in the copied workspace.

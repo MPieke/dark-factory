@@ -2,8 +2,10 @@ package attractor
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -12,6 +14,7 @@ type AgentRequest struct {
 	NodeID    string
 	NodeDir   string
 	Workspace string
+	Logger    *slog.Logger
 }
 
 type AgentResponse struct {
@@ -29,17 +32,23 @@ type Agent interface {
 }
 
 type CodexOptions struct {
+	Executable          string
 	SandboxMode          string
 	ApprovalPolicy       string
 	Workdir              string
 	AddDirs              []string
+	BlockReadPaths       []string
+	StrictReadScope      bool
 	Model                string
 	Profile              string
+	TimeoutSeconds       int
+	HeartbeatSeconds     int
 	ConfigOverrides      []string
 	AutoApproveCommands  []string
 	AutoApproveConfigKey string
 	SkipGitRepoCheck     bool
 	DangerousBypass      bool
+	DisableMCP           bool
 }
 
 func ResolveAgent(node *Node, workspace string) (Agent, error) {
@@ -86,18 +95,44 @@ func (stubAgent) Run(_ AgentRequest) (AgentResponse, error) {
 
 func codexOptionsFromNodeAndEnv(node *Node, workspace string) (CodexOptions, error) {
 	opts := CodexOptions{
+		Executable:    pickString(node.StringAttr("codex.path", ""), os.Getenv("ATTRACTOR_CODEX_PATH"), "codex"),
 		SandboxMode:    pickString(node.StringAttr("codex.sandbox", ""), os.Getenv("ATTRACTOR_CODEX_SANDBOX"), "workspace-write"),
 		ApprovalPolicy: pickString(node.StringAttr("codex.approval", ""), os.Getenv("ATTRACTOR_CODEX_APPROVAL"), ""),
 		Workdir:        pickString(node.StringAttr("codex.workdir", ""), os.Getenv("ATTRACTOR_CODEX_WORKDIR"), ""),
 		Model:          pickString(node.StringAttr("codex.model", ""), os.Getenv("ATTRACTOR_CODEX_MODEL"), ""),
 		Profile:        pickString(node.StringAttr("codex.profile", ""), os.Getenv("ATTRACTOR_CODEX_PROFILE"), ""),
+		TimeoutSeconds: pickInt(node.IntAttr("codex.timeout_seconds", 0), parseIntEnv("ATTRACTOR_CODEX_TIMEOUT_SECONDS"), 0),
+		HeartbeatSeconds: pickInt(
+			node.IntAttr("codex.heartbeat_seconds", 0),
+			parseIntEnv("ATTRACTOR_CODEX_HEARTBEAT_SECONDS"),
+			15,
+		),
 	}
 	opts.DangerousBypass = node.BoolAttr("codex.dangerous_bypass", false) || parseBoolEnv("ATTRACTOR_CODEX_DANGEROUS_BYPASS")
 	opts.SkipGitRepoCheck = node.BoolAttr("codex.skip_git_repo_check", false) || parseBoolEnv("ATTRACTOR_CODEX_SKIP_GIT_REPO_CHECK")
+	opts.StrictReadScope = node.BoolAttr("codex.strict_read_scope", false) || parseBoolEnv("ATTRACTOR_CODEX_STRICT_READ_SCOPE")
+	opts.DisableMCP = node.BoolAttr("codex.disable_mcp", false) || parseBoolEnv("ATTRACTOR_CODEX_DISABLE_MCP")
 	opts.AddDirs = pickList(node.StringAttr("codex.add_dirs", ""), os.Getenv("ATTRACTOR_CODEX_ADD_DIRS"))
 	opts.ConfigOverrides = pickConfigOverrides(node.StringAttr("codex.config_overrides", ""), os.Getenv("ATTRACTOR_CODEX_CONFIG_OVERRIDES"))
 	opts.AutoApproveCommands = pickList(node.StringAttr("codex.auto_approve_commands", ""), os.Getenv("ATTRACTOR_CODEX_AUTO_APPROVE_COMMANDS"))
 	opts.AutoApproveConfigKey = pickString(node.StringAttr("codex.auto_approve_config_key", ""), os.Getenv("ATTRACTOR_CODEX_AUTO_APPROVE_CONFIG_KEY"), "")
+	defaultBlockedReadPaths := []string{}
+	if !node.BoolAttr("codex.allow_read_scenarios", false) {
+		defaultBlockedReadPaths = append(defaultBlockedReadPaths, "scripts/scenarios/")
+	}
+	customBlockedReadPaths := pickList(node.StringAttr("codex.block_read_paths", ""), os.Getenv("ATTRACTOR_CODEX_BLOCK_READ_PATHS"))
+	blockedReadPaths := append(defaultBlockedReadPaths, customBlockedReadPaths...)
+	validatedBlocked, err := validateRelativePaths(blockedReadPaths)
+	if err != nil {
+		return CodexOptions{}, err
+	}
+	opts.BlockReadPaths = validatedBlocked
+
+	exe, err := resolveExecutable(workspace, opts.Executable)
+	if err != nil {
+		return CodexOptions{}, err
+	}
+	opts.Executable = exe
 
 	wd, err := resolveDir(workspace, opts.Workdir)
 	if err != nil {
@@ -114,6 +149,64 @@ func codexOptionsFromNodeAndEnv(node *Node, workspace string) (CodexOptions, err
 	}
 	opts.AddDirs = resolved
 	return opts, nil
+}
+
+func resolveExecutable(workspace, executable string) (string, error) {
+	executable = strings.TrimSpace(executable)
+	if executable == "" {
+		return "codex", nil
+	}
+	if filepath.IsAbs(executable) {
+		return filepath.Clean(executable), nil
+	}
+	if !strings.Contains(executable, "/") {
+		return executable, nil
+	}
+	clean := filepath.Clean(executable)
+	for _, seg := range strings.Split(filepath.ToSlash(clean), "/") {
+		if seg == ".." {
+			return "", fmt.Errorf("codex executable path %q contains parent segment", executable)
+		}
+	}
+	return filepath.Join(workspace, clean), nil
+}
+
+func validateRelativePaths(paths []string) ([]string, error) {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(filepath.ToSlash(p))
+		if p == "" {
+			continue
+		}
+		if strings.HasPrefix(p, "/") {
+			return nil, fmt.Errorf("path %q must be relative", p)
+		}
+		clean := filepath.ToSlash(filepath.Clean(p))
+		for _, seg := range strings.Split(clean, "/") {
+			if seg == ".." {
+				return nil, fmt.Errorf("path %q contains parent segment", p)
+			}
+		}
+		if strings.HasSuffix(p, "/") && !strings.HasSuffix(clean, "/") {
+			clean += "/"
+		}
+		if !seen[clean] {
+			seen[clean] = true
+			out = append(out, clean)
+		}
+	}
+	return out, nil
+}
+
+func pickInt(primary, secondary, def int) int {
+	if primary > 0 {
+		return primary
+	}
+	if secondary > 0 {
+		return secondary
+	}
+	return def
 }
 
 func pickString(primary, secondary, def string) string {
@@ -157,6 +250,18 @@ func pickConfigOverrides(primary, secondary string) []string {
 func parseBoolEnv(key string) bool {
 	v := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
 	return v == "1" || v == "true" || v == "yes"
+}
+
+func parseIntEnv(key string) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func resolveDir(workspace, p string) (string, error) {

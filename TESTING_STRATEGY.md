@@ -31,11 +31,19 @@ This repo uses a spec-first, test-first approach with automation as the default 
   - Agent config parsing and command construction
 - Integration tests:
   - Handler execution with workspace diffs
+  - Workspace copy mode preservation (executable-bit retention)
   - Retry/checkpoint semantics
   - Guardrail enforcement
+  - Failure-feedback propagation (`last_failure.*` context + fix prompt injection)
+  - Unfixable-scope guardrail (`unfixable_failure_source`) behavior
+  - Strict read-scope precision (allowlisted subpath remains readable while sibling paths are blocked)
+  - Verification command parser behavior (env-assignment handling and unsafe-syntax rejection)
 - End-to-end tests:
   - Full `RunPipeline` flows and run artifact verification
   - Smoke validation through `scripts/smoke.sh`
+  - Verification command allowlist smoke through `scripts/smoke_verification_allowlist.sh`
+  - Scenario guardrail lint checks through `scripts/scenarios/lint_scenarios.sh`
+  - Negative verification-security run proving shell-chained commands are rejected
 
 ## Anti-reward-hacking guardrails
 - Never “test only the happy path” when adding capabilities.
@@ -50,6 +58,16 @@ This repo uses a spec-first, test-first approach with automation as the default 
   - specs are incomplete or contradictory
   - test evidence conflicts
   - safety or policy intent is unclear
+
+## Scenario preflight policy
+- Scenario scripts should implement `SCENARIO_MODE=selftest|live`.
+- `selftest` must not require external services and should fail only for scenario logic defects.
+- `live` validates real external behavior (for example provider API calls) and can fail for runtime/config issues.
+- Live scenario scripts should resolve provider models dynamically when possible; avoid hardcoded model defaults.
+- Prefer running scenarios through the shared harness:
+  - `bash scripts/scenarios/preflight_scenario.sh <scenario_script> <app_dir>`
+- Preflight harness should classify live failures (`infra` vs `product`) and expose that classification in output.
+- Use `REQUIRE_LIVE=0` only when intentionally skipping external dependency checks.
 
 ## Spec quality requirements
 Specs should be precise enough that two independent implementations converge:

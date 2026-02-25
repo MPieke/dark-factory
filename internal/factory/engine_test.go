@@ -39,6 +39,27 @@ func readJSONLTypes(t *testing.T, p string) []string {
 	return out
 }
 
+func readJSONLRecords(t *testing.T, p string) []map[string]any {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	out := []map[string]any{}
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		m := map[string]any{}
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
 func setupRun(t *testing.T, dot string) (workdir, runsdir, pipeline string) {
 	t.Helper()
 	root := t.TempDir()
@@ -190,6 +211,25 @@ func TestGuardWorkspaceCreatedAndUsed(t *testing.T) {
 	}
 }
 
+func TestWorkspaceCopyExcludesNestedRunsDir(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G { start [shape=Mdiamond]; a [shape=box]; exit [shape=Msquare]; start -> a; a -> exit; }`
+	workdir, _, pipeline := setupRun(t, dot)
+	runsdir := filepath.Join(workdir, ".runs")
+	writeFile(t, filepath.Join(workdir, "seed.txt"), "hello")
+
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "rin"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(runsdir, "rin", "workspace", "seed.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(runsdir, "rin", "workspace", ".runs")); err == nil {
+		t.Fatal("workspace should not contain nested .runs copy")
+	}
+}
+
 func TestGuardAllowlistPermitsSpecificWrites(t *testing.T) {
 	dot := `digraph G { start [shape=Mdiamond]; t [shape=parallelogram, tool_command="sh -c 'echo hi > a.txt'", allowed_write_paths="a.txt"]; exit [shape=Msquare]; start -> t; t -> exit; }`
 	workdir, runsdir, pipeline := setupRun(t, dot)
@@ -230,6 +270,20 @@ func TestGuardEscapeHeuristics(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(runsdir, "r11", "oops.txt")); err == nil {
 		t.Fatal("oops.txt should not be created")
+	}
+}
+
+func TestGuardAllowsGoTestDotDotDot(t *testing.T) {
+	dot := `digraph G { start [shape=Mdiamond]; t [shape=parallelogram, tool_command="go test ./..."]; exit [shape=Msquare]; start -> t; t -> exit; }`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	writeFile(t, filepath.Join(workdir, "go.mod"), "module x\n\ngo 1.22\n")
+	writeFile(t, filepath.Join(workdir, "x_test.go"), "package x\nimport \"testing\"\nfunc TestX(t *testing.T){}\n")
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r11b"}); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := os.ReadFile(filepath.Join(runsdir, "r11b", "t", "status.json"))
+	if !strings.Contains(string(st), `"outcome": "success"`) {
+		t.Fatalf("expected success, got: %s", string(st))
 	}
 }
 
@@ -362,5 +416,264 @@ func TestVerificationNodeRejectsCommandOutsideAllowlist(t *testing.T) {
 	st, _ := os.ReadFile(filepath.Join(runsdir, "r16", "verify", "status.json"))
 	if !strings.Contains(string(st), "command not allowed") {
 		t.Fatalf("expected command allowlist failure: %s", string(st))
+	}
+}
+
+func TestVerificationNodeAllowsEnvPrefixedGoCommand(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	generate [
+		shape=box,
+		"test.verification_plan_json"="{\"files\":[\"go.mod\",\"main.go\"],\"commands\":[\"GOCACHE=\\\"$PWD/.gocache\\\" go test ./...\"]}"
+	];
+	verify [
+		shape=parallelogram,
+		type=verification,
+		"verification.allowed_commands"="go test"
+	];
+	exit [shape=Msquare];
+	start -> generate;
+	generate -> verify;
+	verify -> exit [condition="outcome=success"];
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	writeFile(t, filepath.Join(workdir, "go.mod"), "module x\n\ngo 1.22\n")
+	writeFile(t, filepath.Join(workdir, "main.go"), "package main\nfunc main(){}\n")
+	writeFile(t, filepath.Join(workdir, "main_test.go"), "package main\nimport \"testing\"\nfunc TestX(t *testing.T){}\n")
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r17"}); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := os.ReadFile(filepath.Join(runsdir, "r17", "verify", "status.json"))
+	if !strings.Contains(string(st), `"outcome": "success"`) {
+		t.Fatalf("expected verification success: %s", string(st))
+	}
+}
+
+func TestVerificationNodeUsesConfiguredWorkdir(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	generate [
+		shape=box,
+		"test.verification_plan_json"="{\"files\":[\"agent/main.go\",\"agent/main_test.go\"],\"commands\":[\"gofmt -w main.go main_test.go\"]}"
+	];
+	verify [
+		shape=parallelogram,
+		type=verification,
+		"verification.allowed_commands"="gofmt",
+		"verification.workdir"="agent"
+	];
+	exit [shape=Msquare];
+	start -> generate;
+	generate -> verify;
+	verify -> exit [condition="outcome=success"];
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	writeFile(t, filepath.Join(workdir, "agent/main.go"), "package main\nfunc main(){}\n")
+	writeFile(t, filepath.Join(workdir, "agent/main_test.go"), "package main\nimport \"testing\"\nfunc TestX(t *testing.T){}\n")
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r18"}); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := os.ReadFile(filepath.Join(runsdir, "r18", "verify", "status.json"))
+	if !strings.Contains(string(st), `"outcome": "success"`) {
+		t.Fatalf("expected verification success with configured workdir: %s", string(st))
+	}
+}
+
+func TestFailureContextStoredForFixRouting(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	validate [shape=parallelogram, type=tool, tool_command="sh -c 'echo FAIL_DETAIL 1>&2; exit 1'"];
+	fix [shape=box, prompt="Fix based on feedback"];
+	exit [shape=Msquare];
+	start -> validate;
+	validate -> fix [condition="outcome=fail"];
+	fix -> exit [condition="outcome=success"];
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r19"}); err != nil {
+		t.Fatal(err)
+	}
+	cpBytes, err := os.ReadFile(filepath.Join(runsdir, "r19", "checkpoint.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cp Checkpoint
+	if err := json.Unmarshal(cpBytes, &cp); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := cp.Context["last_failure.node_id"].(string); !ok || got != "validate" {
+		t.Fatalf("missing/invalid last_failure.node_id: %#v", cp.Context["last_failure.node_id"])
+	}
+	if got, ok := cp.Context["last_failure.reason"].(string); !ok || !strings.Contains(got, "tool_exit_code_1") {
+		t.Fatalf("missing/invalid last_failure.reason: %#v", cp.Context["last_failure.reason"])
+	}
+	if got, ok := cp.Context["last_failure.summary"].(string); !ok || !strings.Contains(got, "FAIL_DETAIL") {
+		t.Fatalf("missing/invalid last_failure.summary: %#v", cp.Context["last_failure.summary"])
+	}
+}
+
+func TestFixPromptIncludesFailureFeedback(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	validate [shape=parallelogram, type=tool, tool_command="sh -c 'echo MODEL_404 1>&2; exit 1'"];
+	fix [shape=box, prompt="Validation failed.\nFix it."];
+	exit [shape=Msquare];
+	start -> validate;
+	validate -> fix [condition="outcome=fail"];
+	fix -> exit [condition="outcome=success"];
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r20"}); err != nil {
+		t.Fatal(err)
+	}
+	promptBytes, err := os.ReadFile(filepath.Join(runsdir, "r20", "fix", "prompt.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := string(promptBytes)
+	if !strings.Contains(prompt, "Validation failed.") {
+		t.Fatalf("expected base prompt content, got: %s", prompt)
+	}
+	if !strings.Contains(prompt, "Failure feedback") {
+		t.Fatalf("expected injected failure section, got: %s", prompt)
+	}
+	if !strings.Contains(prompt, "MODEL_404") {
+		t.Fatalf("expected failure stderr detail in prompt, got: %s", prompt)
+	}
+	if !strings.Contains(prompt, "validate") {
+		t.Fatalf("expected failed node id in prompt, got: %s", prompt)
+	}
+}
+
+func TestCodergenPromptIncludesDownstreamVerificationAllowlist(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	implement [shape=box, prompt="Build feature."];
+	verify [
+		shape=parallelogram,
+		type=verification,
+		"verification.allowed_commands"="go test,go build,gofmt"
+	];
+	exit [shape=Msquare];
+	start -> implement;
+	implement -> verify;
+	verify -> exit [condition="outcome=success"];
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r20b"}); err == nil {
+		t.Fatal("expected verify failure due missing plan")
+	}
+	promptBytes, err := os.ReadFile(filepath.Join(runsdir, "r20b", "implement", "prompt.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := string(promptBytes)
+	if !strings.Contains(prompt, "Verification plan command allowlist") {
+		t.Fatalf("expected allowlist section in prompt: %s", prompt)
+	}
+	for _, cmd := range []string{"go test", "go build", "gofmt"} {
+		if !strings.Contains(prompt, cmd) {
+			t.Fatalf("expected %q in prompt: %s", cmd, prompt)
+		}
+	}
+}
+
+func TestCodergenPromptUsesNodeVerificationAllowlistOverride(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	implement [shape=box, prompt="Build feature.", "verification.allowed_commands"="go test"];
+	verify [
+		shape=parallelogram,
+		type=verification,
+		"verification.allowed_commands"="go build,gofmt"
+	];
+	exit [shape=Msquare];
+	start -> implement;
+	implement -> verify;
+	verify -> exit [condition="outcome=success"];
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r20c"}); err == nil {
+		t.Fatal("expected verify failure due missing plan")
+	}
+	promptBytes, err := os.ReadFile(filepath.Join(runsdir, "r20c", "implement", "prompt.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := string(promptBytes)
+	if !strings.Contains(prompt, "- go test") {
+		t.Fatalf("expected node override allowlist in prompt: %s", prompt)
+	}
+	if strings.Contains(prompt, "go build") || strings.Contains(prompt, "gofmt") {
+		t.Fatalf("expected downstream allowlist to be ignored when node override set: %s", prompt)
+	}
+}
+
+func TestFixNodeFailsFastWhenFailureSourceOutsideWriteScope(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	validate [shape=parallelogram, type=tool, tool_command="bash scripts/scenarios/agent_cli_user_scenarios.sh agent"];
+	fix [shape=box, allowed_write_paths="agent/", prompt="Try fix"];
+	exit [shape=Msquare];
+	start -> validate;
+	validate -> fix [condition="outcome=fail"];
+	fix -> exit [condition="outcome=success"];
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r21"})
+	if err == nil {
+		t.Fatal("expected unfixable failure-source error")
+	}
+	if !strings.Contains(err.Error(), "unfixable_failure_source") {
+		t.Fatalf("expected unfixable failure-source error, got: %v", err)
+	}
+}
+
+func TestFixNodeAllowedWhenWriteScopeIncludesFailureSource(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	validate [shape=parallelogram, type=tool, tool_command="bash scripts/scenarios/agent_cli_user_scenarios.sh agent"];
+	fix [shape=box, allowed_write_paths="agent/,scripts/scenarios/", prompt="Try fix"];
+	exit [shape=Msquare];
+	start -> validate;
+	validate -> fix [condition="outcome=fail"];
+	fix -> exit [condition="outcome=success"];
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r22"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(runsdir, "r22", "exit", "status.json")); err != nil {
+		t.Fatalf("expected pipeline to reach exit: %v", err)
+	}
+}
+
+func TestCopyDirPreservesExecutableBit(t *testing.T) {
+	srcRoot := t.TempDir()
+	dstRoot := t.TempDir()
+	srcFile := filepath.Join(srcRoot, ".factory", "bin", "codex")
+	writeFile(t, srcFile, "#!/usr/bin/env bash\necho ok\n")
+	if err := os.Chmod(srcFile, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyDir(srcRoot, dstRoot, nil); err != nil {
+		t.Fatal(err)
+	}
+	dstFile := filepath.Join(dstRoot, ".factory", "bin", "codex")
+	info, err := os.Stat(dstFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("expected executable bit on copied file, got mode %o", info.Mode().Perm())
 	}
 }

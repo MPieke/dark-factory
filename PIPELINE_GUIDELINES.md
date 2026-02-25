@@ -34,10 +34,13 @@ Think of it as a small state machine:
 - Verification node (deterministic checks from plan):
   - `type=verification` (usually with `shape=parallelogram`)
   - reads plan from context key `verification.plan` by default
+  - optional `verification.workdir` to run verification commands from a relative subdirectory
   - requires `verification.allowed_commands="prefix1,prefix2,..."`
+  - verification commands must avoid shell chaining syntax (`;`, `&&`, `||`, `|`, redirects, subshell markers)
 - Codergen node (agent-driven):
   - default for `shape=box` (or `type=codergen`)
   - uses `prompt="..."`
+  - automatically receives appended runtime failure feedback when prior stage failed (`last_failure.*` context)
 
 ## Supported edge conditions
 Only these are valid in v0:
@@ -60,7 +63,61 @@ If multiple matching edges exist, highest `weight` wins.
   - absolute path tokens
 
 Practical implication:
-- In v0, prefer `go build .` over `go build ./...` because `./...` triggers the `..` guardrail check.
+- Parent-directory path escapes are blocked (for example `../secret`), but normal Go patterns like `./...` are allowed.
+- Fix-loop scope guard:
+  - If previous failed tool stage references script paths outside the fix node `allowed_write_paths`, runtime stops with `unfixable_failure_source`.
+
+## Scenario isolation (recommended)
+- If scenario scripts are meant to be holdout validators, do not expose them to agent nodes.
+- Codex backend also enforces this by default by hiding `scripts/scenarios/` during agent execution.
+- For Codex-backed nodes:
+  - set `codex.workdir` to the app directory (example: `agent`)
+  - set `codex.add_dirs` only for required read context (example: `examples/specs`)
+  - set `codex.strict_read_scope=true` to hard-enforce read scope to workdir + add_dirs
+  - keep scenario scripts executed only by tool/verification nodes
+- Keep prompts aligned with this policy (avoid "read scenario scripts" instructions).
+- Set `verification.allowed_commands` on codergen nodes when possible so command policy is injected into prompts before generation.
+- Only opt out intentionally:
+  - `codex.allow_read_scenarios=true`
+  - or custom blocked paths with `codex.block_read_paths`.
+
+Scenario script reliability rules:
+- Do not hardcode live provider model ids as script defaults.
+- Prefer dynamic model resolution (provider model-list API) with env override support.
+- Use per-run temp files (`mktemp`) instead of fixed `/tmp/...` names.
+- Emit explicit failure classification for live checks (`failure_class=infra|product`) in the preflight harness.
+
+## Spec separation (recommended)
+- Use two spec layers:
+  - builder-visible product spec (what to build)
+  - orchestration/evaluation docs (how factory validates/routes)
+- Builder prompts should reference only product spec paths.
+- Avoid including pipeline internals (nodes, routing, layered architecture notes) in builder-visible specs.
+
+Example:
+```dot
+ensure_codex_wrapper [
+  shape=parallelogram,
+  type=tool,
+  allowed_write_paths=".factory/bin/",
+  tool_command="mkdir -p .factory/bin && cp scripts/codex-wrapper.sh .factory/bin/codex && chmod +x .factory/bin/codex"
+];
+
+implement [
+  shape=box,
+  agent.backend="codex",
+  codex.path=".factory/bin/codex",
+  codex.disable_mcp=true,
+  codex.workdir="agent",
+  codex.add_dirs="examples/specs",
+  codex.strict_read_scope=true,
+  "verification.allowed_commands"="go test,go build,gofmt,bash scripts/scenarios/preflight_scenario.sh",
+  allowed_write_paths="agent/",
+  prompt="Read ../examples/specs/my_spec.md.\nDo not read scenario scripts.\nUse GOCACHE=\"$PWD/.gocache\" for go commands.\n"
+];
+```
+
+If `codex.path` is workspace-relative, bootstrap it before agent stages. Otherwise the run fails with missing executable.
 
 ## Prompt formatting rules
 - Use one quoted string for `prompt`.
@@ -74,7 +131,7 @@ prompt="Line 1\nLine 2\nLine 3\n"
 
 ## Recommended authoring workflow
 1. Start with a minimal linear pipeline.
-2. Add a test node that validates success criteria.
+2. Add a scenario lint gate (`bash scripts/scenarios/lint_scenarios.sh ...`) before runtime validators.
 3. Add a fix loop for `outcome=fail`.
 4. Add write guardrails (`allowed_write_paths`).
 5. Run with fake backend first for deterministic flow checks.
@@ -163,6 +220,10 @@ Expected generated verification plan shape:
 - Mistake: verification plan missing from context
   - Symptom: verification fails with `verification plan missing in context key`
   - Fix: ensure previous node writes `verification_plan` (or `context_updates`) to the configured context key
+
+- Mistake: fix loop drifts away from failing validator
+  - Symptom: repeated `... -> fix -> ... -> fix` cycles with same validator error
+  - Fix: confirm failed stage artifacts are produced and inspect `fix/prompt.md` for injected `Failure feedback`
 
 - Mistake: no exit path for failures
   - Symptom: routing error (`no route from node ...`)

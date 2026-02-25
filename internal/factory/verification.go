@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -36,7 +37,7 @@ func (verificationHandler) Execute(node *Node, ctx Context, _ *Graph, nodeDir st
 			FailureReason:    fmt.Sprintf("verification plan missing in context key: %s", key),
 		}, nil
 	}
-	plan, err := ParseVerificationPlan(raw)
+	plan, err := ParseVerificationPlanForWorkspace(raw, workspace)
 	if err != nil {
 		return Outcome{
 			SchemaVersion:    1,
@@ -79,6 +80,16 @@ func (verificationHandler) Execute(node *Node, ctx Context, _ *Graph, nodeDir st
 	}
 
 	results := verificationResults{CheckedFiles: append([]string{}, plan.Files...), Commands: make([]verificationCommandResult, 0, len(plan.Commands))}
+	workingDir, err := resolveVerificationWorkdir(workspace, node.StringAttr("verification.workdir", ""))
+	if err != nil {
+		return Outcome{
+			SchemaVersion:    1,
+			Outcome:          "fail",
+			SuggestedNextIDs: []string{},
+			ContextUpdates:   map[string]any{},
+			FailureReason:    err.Error(),
+		}, nil
+	}
 	for _, command := range plan.Commands {
 		if err := validateToolCommand(command); err != nil {
 			return Outcome{
@@ -98,8 +109,19 @@ func (verificationHandler) Execute(node *Node, ctx Context, _ *Graph, nodeDir st
 				FailureReason:    fmt.Sprintf("verification command not allowed: %s", command),
 			}, nil
 		}
-		cmd := exec.Command("sh", "-c", command)
-		cmd.Dir = workspace
+		parsed, err := parseVerificationCommand(command, workingDir)
+		if err != nil {
+			return Outcome{
+				SchemaVersion:    1,
+				Outcome:          "fail",
+				SuggestedNextIDs: []string{},
+				ContextUpdates:   map[string]any{},
+				FailureReason:    err.Error(),
+			}, nil
+		}
+		cmd := exec.Command(parsed.Name, parsed.Args...)
+		cmd.Dir = workingDir
+		cmd.Env = append(os.Environ(), parsed.Env...)
 		stdout, _ := cmd.StdoutPipe()
 		stderr, _ := cmd.StderrPipe()
 		if err := cmd.Start(); err != nil {
@@ -107,13 +129,13 @@ func (verificationHandler) Execute(node *Node, ctx Context, _ *Graph, nodeDir st
 		}
 		outB, _ := io.ReadAll(stdout)
 		errB, _ := io.ReadAll(stderr)
-		err := cmd.Wait()
+		waitErr := cmd.Wait()
 		exitCode := 0
-		if err != nil {
-			if ee, ok := err.(*exec.ExitError); ok {
+		if waitErr != nil {
+			if ee, ok := waitErr.(*exec.ExitError); ok {
 				exitCode = ee.ExitCode()
 			} else {
-				return Outcome{}, err
+				return Outcome{}, waitErr
 			}
 		}
 		results.Commands = append(results.Commands, verificationCommandResult{
@@ -150,8 +172,36 @@ func (verificationHandler) Execute(node *Node, ctx Context, _ *Graph, nodeDir st
 	}, nil
 }
 
+func resolveVerificationWorkdir(workspace, configured string) (string, error) {
+	configured = strings.TrimSpace(configured)
+	if configured == "" {
+		return workspace, nil
+	}
+	if strings.HasPrefix(configured, "/") || filepath.IsAbs(configured) {
+		return "", fmt.Errorf("verification.workdir must be relative")
+	}
+	clean := filepath.Clean(configured)
+	for _, seg := range strings.Split(filepath.ToSlash(clean), "/") {
+		if seg == ".." {
+			return "", fmt.Errorf("verification.workdir cannot contain parent segment")
+		}
+	}
+	dir := filepath.Join(workspace, clean)
+	info, err := os.Stat(dir)
+	if err != nil {
+		return "", fmt.Errorf("verification.workdir missing: %s", configured)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("verification.workdir is not a directory: %s", configured)
+	}
+	return dir, nil
+}
+
 func commandAllowed(command string, allowedPrefixes []string) bool {
-	cmd := strings.TrimSpace(command)
+	if hasUnsafeShellSyntax(command) {
+		return false
+	}
+	cmd := normalizeCommandForAllowlist(command)
 	for _, p := range allowedPrefixes {
 		p = strings.TrimSpace(p)
 		if p == "" {
@@ -165,4 +215,143 @@ func commandAllowed(command string, allowedPrefixes []string) bool {
 		}
 	}
 	return false
+}
+
+type parsedVerificationCommand struct {
+	Env  []string
+	Name string
+	Args []string
+}
+
+func parseVerificationCommand(command, workingDir string) (parsedVerificationCommand, error) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return parsedVerificationCommand{}, fmt.Errorf("verification command cannot be empty")
+	}
+	if hasUnsafeShellSyntax(command) {
+		return parsedVerificationCommand{}, fmt.Errorf("verification command rejected: contains unsafe shell syntax")
+	}
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return parsedVerificationCommand{}, fmt.Errorf("verification command cannot be empty")
+	}
+	parsed := parsedVerificationCommand{}
+	i := 0
+	for i < len(fields) && isEnvAssignmentToken(fields[i]) {
+		eq := strings.IndexByte(fields[i], '=')
+		key := fields[i][:eq]
+		val := expandVerificationEnvValue(fields[i][eq+1:], workingDir)
+		parsed.Env = append(parsed.Env, key+"="+val)
+		i++
+	}
+	if i >= len(fields) {
+		return parsedVerificationCommand{}, fmt.Errorf("verification command missing executable")
+	}
+	parsed.Name = fields[i]
+	parsed.Args = append([]string{}, fields[i+1:]...)
+	return parsed, nil
+}
+
+func expandVerificationEnvValue(raw, workingDir string) string {
+	raw = strings.TrimSpace(raw)
+	if len(raw) >= 2 {
+		if (raw[0] == '"' && raw[len(raw)-1] == '"') || (raw[0] == '\'' && raw[len(raw)-1] == '\'') {
+			if unquoted, err := strconv.Unquote(raw); err == nil {
+				raw = unquoted
+			} else {
+				raw = raw[1 : len(raw)-1]
+			}
+		}
+	}
+	raw = strings.ReplaceAll(raw, "$PWD", workingDir)
+	raw = strings.ReplaceAll(raw, "${PWD}", workingDir)
+	return raw
+}
+
+func hasUnsafeShellSyntax(command string) bool {
+	command = strings.TrimSpace(command)
+	unsafe := []string{"&&", "||", ";", "|", "`", "$(", ">", "<", "\n", "\r"}
+	for _, token := range unsafe {
+		if strings.Contains(command, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeCommandForAllowlist(command string) string {
+	cmd := strings.TrimSpace(command)
+	for {
+		original := cmd
+		cmd = trimWrappingParens(cmd)
+		cmd = stripLeadingEnvAssignments(cmd)
+		cmd = stripLeadingShellWrappers(cmd)
+		cmd = strings.TrimSpace(cmd)
+		if cmd == original {
+			break
+		}
+	}
+	return cmd
+}
+
+func trimWrappingParens(cmd string) string {
+	cmd = strings.TrimSpace(cmd)
+	for len(cmd) >= 2 && strings.HasPrefix(cmd, "(") && strings.HasSuffix(cmd, ")") {
+		inner := strings.TrimSpace(cmd[1 : len(cmd)-1])
+		if inner == "" {
+			break
+		}
+		cmd = inner
+	}
+	return cmd
+}
+
+func stripLeadingEnvAssignments(cmd string) string {
+	fields := strings.Fields(cmd)
+	i := 0
+	for i < len(fields) && isEnvAssignmentToken(fields[i]) {
+		i++
+	}
+	if i == 0 {
+		return cmd
+	}
+	return strings.Join(fields[i:], " ")
+}
+
+func isEnvAssignmentToken(tok string) bool {
+	if tok == "" || strings.HasPrefix(tok, "=") || strings.HasSuffix(tok, "=") {
+		return false
+	}
+	eq := strings.IndexByte(tok, '=')
+	if eq <= 0 {
+		return false
+	}
+	key := tok[:eq]
+	for i, r := range key {
+		if i == 0 {
+			if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && r != '_' {
+				return false
+			}
+			continue
+		}
+		if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func stripLeadingShellWrappers(cmd string) string {
+	trimmed := strings.TrimSpace(cmd)
+	if strings.HasPrefix(trimmed, "export ") {
+		if idx := strings.Index(trimmed, "&&"); idx >= 0 {
+			return strings.TrimSpace(trimmed[idx+2:])
+		}
+	}
+	if strings.HasPrefix(trimmed, "cd ") {
+		if idx := strings.Index(trimmed, "&&"); idx >= 0 {
+			return strings.TrimSpace(trimmed[idx+2:])
+		}
+	}
+	return cmd
 }

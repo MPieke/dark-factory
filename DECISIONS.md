@@ -27,6 +27,7 @@ Why:
 ## 3) Workspace isolation by copy
 Decision:
 - Each run gets its own `workspace/` copied from `--workdir`.
+- If `--runsdir` is inside `--workdir`, exclude that nested path from copy.
 
 Why:
 - Avoids mutating source state directly.
@@ -35,6 +36,7 @@ Why:
 
 Tradeoff:
 - Copying can be slower for large repos.
+- Nested runsdir exclusion avoids recursive copy explosions but requires path normalization logic in copy step.
 
 ## 4) File write guardrails (`allowed_write_paths`)
 Decision:
@@ -120,7 +122,19 @@ Why:
 - Avoids baking provider-specific policy assumptions into engine code.
 - Leaves room for different agent providers with different control surfaces.
 
-## 11) Exit codes and error classes
+## 11) Runtime observability as first-class behavior
+Decision:
+- Use structured logs for pipeline and stage lifecycle.
+- Add Codex execution lifecycle logs (start, heartbeat, completion/failure/timeout).
+- Persist Codex invocation details (`codex.args.txt`) and stream output logs.
+- Support opt-in live stream logging with `FACTORY_LOG_CODEX_STREAM=1`.
+
+Why:
+- Removes blind spots where long-running agent nodes appear idle.
+- Makes hangs/timeouts diagnosable without manual postmortem guesswork.
+- Keeps default noise reasonable while allowing high-visibility debugging when needed.
+
+## 12) Exit codes and error classes
 Decision:
 - CLI returns:
   - `1` for normal failures/usage errors.
@@ -129,7 +143,19 @@ Decision:
 Why:
 - Keeps command-line behavior simple while distinguishing severe internal failures.
 
-## 12) Testing philosophy
+## 13) Scenario validation uses split preflight modes
+Decision:
+- Standardize scenario scripts on:
+  - `SCENARIO_MODE=selftest` for deterministic script correctness checks.
+  - `SCENARIO_MODE=live` for real external/API behavior checks.
+- Use shared runner `scripts/scenarios/preflight_scenario.sh` to run selftest first, then live checks when `REQUIRE_LIVE=1`.
+
+Why:
+- Avoids conflating scenario bugs with provider/network/config failures.
+- Fails fast on broken scenario logic before expensive fix loops.
+- Keeps validation policy reusable across scenario types.
+
+## 14) Testing philosophy
 Decision:
 - Use spec-first and test-first development as the default.
 - Prefer autonomous, executable validation (AI-run tests) over manual inspection.
@@ -139,3 +165,176 @@ Why:
 - Reduces reward-hacking pressure and ambiguous interpretation.
 - Increases reproducibility and confidence in behavior changes.
 - Keeps delivery loop fast while maintaining safety constraints.
+
+## 15) Holdout scenario isolation for Codex nodes
+Decision:
+- Apply a runtime read-isolation safeguard in the Codex backend:
+  - default blocked read path: `scripts/scenarios/`
+  - blocked paths are physically hidden from workspace before Codex execution and restored after execution
+- Keep node-level scoping (`codex.workdir`, `codex.add_dirs`) for least-privilege context.
+- Allow explicit opt-out only when intentional:
+  - `codex.allow_read_scenarios=true`
+  - optional custom blocked list via `codex.block_read_paths` / `ATTRACTOR_CODEX_BLOCK_READ_PATHS`
+
+Why:
+- Keeps user scenario scripts as external validation criteria instead of in-model hints.
+- Reduces reward hacking by preventing direct scenario overfitting.
+- Enforces isolation at runtime rather than relying only on prompt policy.
+
+Tradeoff:
+- Agent nodes have less context and may need more fix iterations for scenario-derived failures.
+
+## 16) Go cache writes must stay inside allowed write scope
+Decision:
+- Agent prompts now require `GOCACHE="$PWD/.gocache"` while running from `agent/`.
+- Keep `allowed_write_paths="agent/"` rather than broadening to workspace-level cache paths.
+
+Why:
+- Prevents guardrail false failures caused by cache writes under workspace root (`.gocache/...`).
+- Preserves tight write boundaries without weakening policy.
+
+## 17) Verification allowlist matches normalized command intent
+Decision:
+- Verification allowlist matching now normalizes commands before prefix checks:
+  - strips leading env assignments (for example `GOCACHE=...`)
+  - trims wrapping parentheses
+- Verification rejects unsafe shell syntax (`;`, `&&`, `||`, pipes, redirects, subshell markers).
+- Verification executes commands directly rather than through `sh -c`.
+
+Why:
+- Keeps allowlist policy focused on command intent (`go test`, `go build`) while removing shell-chaining bypass risk.
+- Reduces command-injection surface in verification nodes.
+
+## 18) Builder prompts must avoid orchestrator metadata
+Decision:
+- Agent builder nodes should consume a product-only builder spec, not orchestration context.
+- Pipeline metadata (layers, routing, node strategy, validation topology) stays outside builder-visible spec files.
+
+Why:
+- Reduces implementation bias toward pipeline mechanics.
+- Keeps agent behavior aligned with product outcomes rather than orchestrator internals.
+- Preserves clean separation between build intent and evaluation policy.
+
+## 19) Strict Codex read scope for builder nodes
+Decision:
+- Support `codex.strict_read_scope=true` to restrict Codex-readable workspace paths to:
+  - `codex.workdir`
+  - explicit `codex.add_dirs`
+- At runtime, all other top-level workspace entries are temporarily hidden during Codex execution.
+
+Why:
+- Prevents accidental reads of repo memory/docs/orchestrator metadata via `..` traversal.
+- Makes builder context explicitly least-privilege instead of convention-based.
+
+## 20) Verification execution directory must be configurable
+Decision:
+- Added `verification.workdir` (relative to workspace) for verification nodes.
+- Verification commands default to workspace root when unset.
+
+Why:
+- Generated verification commands are often relative to app directory context.
+- Running all verification commands from workspace root causes avoidable path/cwd failures.
+
+## 21) Failed-stage feedback must be injected into subsequent fix prompts
+Decision:
+- On any stage failure, store structured failure context in run context:
+  - `last_failure.node_id`
+  - `last_failure.node_type`
+  - `last_failure.reason`
+  - `last_failure.summary`
+  - `last_failure.artifacts`
+- Codergen prompts automatically append a `Failure feedback` section when `last_failure.summary` exists.
+
+Why:
+- Avoids fix-loop drift where the agent does not see the concrete failing validation output.
+- Makes feedback plumbing generic across pipelines instead of custom per-DOT prompt wiring.
+
+## 22) User scenarios must resolve live provider models dynamically
+Decision:
+- `agent_cli_user_scenarios.sh` now resolves Anthropic live model via `/v1/models` when `ANTHROPIC_LIVE_MODEL` is unset.
+- Removed hardcoded default live model id for Anthropic.
+- Scenario temp output files now use `mktemp` instead of fixed `/tmp/...` names.
+
+Why:
+- Provider model availability varies by account/region and changes over time.
+- Hardcoded model ids caused repeated false-negative scenario failures.
+- Fixed temp filenames create cross-run interference risk.
+
+## 23) Codex executable path must fail fast and be bootstrapped in-pipeline
+Decision:
+- If `codex.path` contains a path separator, validate it exists and is executable before launch.
+- For POC pipelines that depend on a local wrapper path (`.factory/bin/codex`), add a deterministic tool stage to create/copy that wrapper before Codex nodes run.
+
+Why:
+- Prevents opaque `fork/exec ... no such file or directory` failures deep in execution.
+- Makes wrapper setup explicit and auditable in pipeline artifacts.
+- Keeps MCP-disable wrapper behavior deterministic across manual runs.
+
+## 23) Scenario lint must be a hard preflight guardrail
+Decision:
+- Added `scripts/scenarios/lint_scenarios.sh` and run it as a pipeline gate before live dependency preflight.
+- Lint failures are treated as config failures (`exit_config_fail`) rather than fix-loop inputs.
+
+Why:
+- Scenario infrastructure bugs should fail fast before agent implementation/fix cycles consume time and tokens.
+- Prevents known classes of failures from reaching runtime:
+  - hardcoded live provider model defaults
+  - fixed `/tmp` artifact paths
+
+## 24) Stop fix loops when failure source is outside fix write scope
+Decision:
+- Added runtime guardrail: before a codergen/fix node runs, if the previous failed tool node references script paths outside the current node `allowed_write_paths`, fail immediately with `unfixable_failure_source`.
+
+Why:
+- Prevents loops where the agent cannot legally patch the failing source under current write constraints.
+- Surfaces a clear orchestration-config error instead of spending tokens on impossible fixes.
+
+## 25) Preflight scenario harness must classify live failures
+Decision:
+- `preflight_scenario.sh` now classifies live check failures:
+  - `failure_class=infra` for provider/config/dependency failures (exits `86`)
+  - `failure_class=product` for behavior/spec failures (preserves original non-zero exit)
+
+Why:
+- Distinguishes external dependency failures from application behavior failures.
+- Improves diagnostics and enables deterministic routing policy in future graphs.
+
+## 26) Factory Codex runs should support local executable path and MCP-off mode
+Decision:
+- Added `codex.path` / `ATTRACTOR_CODEX_PATH` to select the Codex executable path (supports workspace-relative wrapper paths).
+- Added `codex.disable_mcp` / `ATTRACTOR_CODEX_DISABLE_MCP` to force `mcp_servers.memory_ops.enabled=false`.
+
+Why:
+- Prevents context leakage from user-global Codex MCP memory servers in factory-managed runs.
+- Allows deterministic local wrapper execution without editing user-global `~/.codex/config.toml`.
+
+## 27) Workspace copy must preserve executable bit
+Decision:
+- `copyDir` now preserves source file permissions instead of forcing `0644`.
+
+Why:
+- Local tool wrappers (for example `codex.path=.factory/bin/codex`) require executable permissions in run workspaces.
+- Stripping execute bits caused runtime `permission denied` failures unrelated to pipeline logic.
+
+## 28) Strict read scope must be path-precise, not root-precise
+Decision:
+- `codex.strict_read_scope` now preserves only exact allowed path prefixes:
+  - `codex.workdir`
+  - `codex.add_dirs`
+  - configured executable path (`codex.path`)
+- Non-allowed subpaths under shared roots are hidden (for example `examples/other` when only `examples/specs` is allowed).
+
+Why:
+- Root-level scoping leaked unrelated files under allowed roots and weakened holdout isolation.
+- Path-precise scoping enforces least privilege more reliably.
+
+## 29) Pass verification allowlist to codergen prompts before generation
+Decision:
+- Codergen prompt assembly now injects verification command policy before agent execution.
+- Allowlist source priority:
+  - node-level `verification.allowed_commands` on the codergen node
+  - otherwise, union of downstream verification-node allowlists
+
+Why:
+- Reduces avoidable `verify_plan` failures caused by agents proposing disallowed commands.
+- Moves policy enforcement earlier in the loop while keeping runtime verification as the final gate.
