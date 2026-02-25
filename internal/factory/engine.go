@@ -1153,7 +1153,15 @@ func copyDir(src, dst string, excludes []string) error {
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(target, b, 0o644)
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		mode := info.Mode().Perm()
+		if mode == 0 {
+			mode = 0o644
+		}
+		return os.WriteFile(target, b, mode)
 	})
 }
 

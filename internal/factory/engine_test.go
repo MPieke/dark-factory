@@ -589,3 +589,25 @@ func TestFixNodeAllowedWhenWriteScopeIncludesFailureSource(t *testing.T) {
 		t.Fatalf("expected pipeline to reach exit: %v", err)
 	}
 }
+
+func TestCopyDirPreservesExecutableBit(t *testing.T) {
+	srcRoot := t.TempDir()
+	dstRoot := t.TempDir()
+	srcFile := filepath.Join(srcRoot, ".factory", "bin", "codex")
+	writeFile(t, srcFile, "#!/usr/bin/env bash\necho ok\n")
+	if err := os.Chmod(srcFile, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyDir(srcRoot, dstRoot, nil); err != nil {
+		t.Fatal(err)
+	}
+	dstFile := filepath.Join(dstRoot, ".factory", "bin", "codex")
+	info, err := os.Stat(dstFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("expected executable bit on copied file, got mode %o", info.Mode().Perm())
+	}
+}

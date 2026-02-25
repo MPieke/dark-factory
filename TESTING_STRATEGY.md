@@ -31,6 +31,7 @@ This repo uses a spec-first, test-first approach with automation as the default 
   - Agent config parsing and command construction
 - Integration tests:
   - Handler execution with workspace diffs
+  - Workspace copy mode preservation (executable-bit retention)
   - Retry/checkpoint semantics
   - Guardrail enforcement
   - Failure-feedback propagation (`last_failure.*` context + fix prompt injection)
