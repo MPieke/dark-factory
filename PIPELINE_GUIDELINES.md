@@ -77,6 +77,11 @@ Practical implication:
   - `codex.allow_read_scenarios=true`
   - or custom blocked paths with `codex.block_read_paths`.
 
+Scenario script reliability rules:
+- Do not hardcode live provider model ids as script defaults.
+- Prefer dynamic model resolution (provider model-list API) with env override support.
+- Use per-run temp files (`mktemp`) instead of fixed `/tmp/...` names.
+
 ## Spec separation (recommended)
 - Use two spec layers:
   - builder-visible product spec (what to build)

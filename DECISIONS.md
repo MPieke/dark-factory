@@ -247,3 +247,14 @@ Decision:
 Why:
 - Avoids fix-loop drift where the agent does not see the concrete failing validation output.
 - Makes feedback plumbing generic across pipelines instead of custom per-DOT prompt wiring.
+
+## 22) User scenarios must resolve live provider models dynamically
+Decision:
+- `agent_cli_user_scenarios.sh` now resolves Anthropic live model via `/v1/models` when `ANTHROPIC_LIVE_MODEL` is unset.
+- Removed hardcoded default live model id for Anthropic.
+- Scenario temp output files now use `mktemp` instead of fixed `/tmp/...` names.
+
+Why:
+- Provider model availability varies by account/region and changes over time.
+- Hardcoded model ids caused repeated false-negative scenario failures.
+- Fixed temp filenames create cross-run interference risk.

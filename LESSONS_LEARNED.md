@@ -248,3 +248,16 @@ This file records concrete failure modes seen in this repo and the fixes applied
 - Prevention (test/check/guardrail):
   - Treat artifact capture and prompt feedback plumbing as first-class orchestration behavior.
   - Keep failure summaries concise and bounded to prevent prompt bloat.
+
+## 21) Static live model ids in scenarios cause persistent false failures
+- Symptom:
+  - `validate_user_scenarios` repeatedly failed with Anthropic 404 for specific model ids.
+- Root cause:
+  - `agent_cli_user_scenarios.sh` used a hardcoded default Anthropic live model id.
+  - Provider model availability changed and differed from preflight model resolution.
+- Fix:
+  - Resolve Anthropic model dynamically from `/v1/models` when not explicitly configured.
+  - Replace fixed `/tmp` artifact names with `mktemp` outputs for safer parallel execution.
+- Prevention (test/check/guardrail):
+  - Avoid hardcoded live model defaults in scenario scripts.
+  - Require scenario scripts to use dynamic provider model discovery or explicit env override.

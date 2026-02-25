@@ -6,7 +6,7 @@ SCENARIO_MODE="${SCENARIO_MODE:-live}"
 REQUIRE_LIVE="${REQUIRE_LIVE:-1}"
 ROOT_DIR="$(cd "$APP_DIR/.." && pwd)"
 OPENAI_LIVE_MODEL="${OPENAI_LIVE_MODEL:-gpt-4.1-mini}"
-ANTHROPIC_LIVE_MODEL="${ANTHROPIC_LIVE_MODEL:-claude-3-5-haiku-20241022}"
+ANTHROPIC_LIVE_MODEL="${ANTHROPIC_LIVE_MODEL:-}"
 
 load_env_if_present() {
   if [ -f "$ROOT_DIR/.env" ]; then
@@ -47,6 +47,49 @@ assert_not_contains() {
 
 load_env_if_present
 
+resolve_anthropic_model() {
+  if [ -n "$ANTHROPIC_LIVE_MODEL" ]; then
+    echo "$ANTHROPIC_LIVE_MODEL"
+    return 0
+  fi
+
+  local models_body
+  models_body="$(mktemp)"
+  local status
+  status="$(curl -sS -o "$models_body" -w "%{http_code}" \
+    -X GET "https://api.anthropic.com/v1/models" \
+    -H "x-api-key: $ANTHROPIC_API_KEY" \
+    -H "anthropic-version: 2023-06-01")"
+
+  if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+    echo "Anthropic models list failed ($status): $(cat "$models_body")"
+    rm -f "$models_body"
+    return 1
+  fi
+
+  local ids
+  ids="$(grep -Eo '"id"[[:space:]]*:[[:space:]]*"[^"]+"' "$models_body" | sed -E 's/^"id"[[:space:]]*:[[:space:]]*"([^"]+)"$/\1/')"
+  rm -f "$models_body"
+  if [ -z "$ids" ]; then
+    echo "Anthropic models list returned no model ids"
+    return 1
+  fi
+
+  local preferred
+  for preferred in \
+    "claude-3-5-haiku-latest" \
+    "claude-3-5-haiku-20241022" \
+    "claude-3-7-sonnet-20250219"
+  do
+    if echo "$ids" | grep -Fxq "$preferred"; then
+      echo "$preferred"
+      return 0
+    fi
+  done
+
+  echo "$ids" | head -n 1
+}
+
 run_selftest() {
   # openai default cheap model
   OUT1="$(run_json --provider openai --prompt hi --mock)"
@@ -62,14 +105,19 @@ run_selftest() {
   assert_contains "$OUT2" "\"response\":\"mock:anthropic:claude-3-5-haiku-latest:hello\""
 
   # unsupported provider must fail
+  local bad_out
+  local bad_err
+  bad_out="$(mktemp)"
+  bad_err="$(mktemp)"
   set +e
   (
     cd "$APP_DIR"
     export GOCACHE="$PWD/.gocache"
-    go run . ask --provider bad --prompt x --mock >/tmp/agent_cli_bad.out 2>/tmp/agent_cli_bad.err
+    go run . ask --provider bad --prompt x --mock >"$bad_out" 2>"$bad_err"
   )
   RC=$?
   set -e
+  rm -f "$bad_out" "$bad_err"
   if [ "$RC" -eq 0 ]; then
     echo "Expected unsupported provider to fail"
     exit 1
@@ -85,6 +133,7 @@ run_live() {
     echo "ANTHROPIC_API_KEY is not set for live scenario checks"
     exit 1
   fi
+  ANTHROPIC_LIVE_MODEL="$(resolve_anthropic_model)" || exit 1
 
   LIVE1="$(run_json --provider openai --model "$OPENAI_LIVE_MODEL" --prompt live-openai-check)"
   assert_contains "$LIVE1" "\"provider\":\"openai\""
