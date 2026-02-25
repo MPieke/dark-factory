@@ -39,6 +39,7 @@ Think of it as a small state machine:
 - Codergen node (agent-driven):
   - default for `shape=box` (or `type=codergen`)
   - uses `prompt="..."`
+  - automatically receives appended runtime failure feedback when prior stage failed (`last_failure.*` context)
 
 ## Supported edge conditions
 Only these are valid in v0:
@@ -197,6 +198,10 @@ Expected generated verification plan shape:
 - Mistake: verification plan missing from context
   - Symptom: verification fails with `verification plan missing in context key`
   - Fix: ensure previous node writes `verification_plan` (or `context_updates`) to the configured context key
+
+- Mistake: fix loop drifts away from failing validator
+  - Symptom: repeated `... -> fix -> ... -> fix` cycles with same validator error
+  - Fix: confirm failed stage artifacts are produced and inspect `fix/prompt.md` for injected `Failure feedback`
 
 - Mistake: no exit path for failures
   - Symptom: routing error (`no route from node ...`)

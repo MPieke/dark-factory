@@ -238,6 +238,9 @@ func (e *Engine) executeFrom(startID string) error {
 		for k, v := range out.ContextUpdates {
 			e.Context[k] = v
 		}
+		if out.Outcome == "fail" {
+			e.captureFailureFeedback(node, nodeDir, out)
+		}
 		e.Context["outcome"] = out.Outcome
 		contextAfter := cloneContext(e.Context)
 		_ = appendTrace(e.RunDir, "NodeOutputCaptured", map[string]any{
@@ -307,6 +310,62 @@ func (e *Engine) logFailureContext(node *Node, nodeDir string) {
 	if tail, ok := readTailSnippet(filepath.Join(nodeDir, "response.md"), 600); ok {
 		e.Logger.Warn("failure detail", "node", node.ID, "source", "response.md", "snippet", tail)
 	}
+}
+
+func (e *Engine) captureFailureFeedback(node *Node, nodeDir string, out Outcome) {
+	artifacts := map[string]string{}
+	candidates := map[string]string{
+		"status":              filepath.Join(nodeDir, "status.json"),
+		"tool_stdout":         filepath.Join(nodeDir, "tool.stdout.txt"),
+		"tool_stderr":         filepath.Join(nodeDir, "tool.stderr.txt"),
+		"tool_exitcode":       filepath.Join(nodeDir, "tool.exitcode.txt"),
+		"verification_results": filepath.Join(nodeDir, "verification.results.json"),
+		"verification_plan":   filepath.Join(nodeDir, "verification.plan.json"),
+		"codex_stdout":        filepath.Join(nodeDir, "codex.stdout.log"),
+		"codex_stderr":        filepath.Join(nodeDir, "codex.stderr.log"),
+		"codex_response":      filepath.Join(nodeDir, "response.md"),
+	}
+	for key, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			artifacts[key] = p
+		}
+	}
+	e.Context["last_failure.node_id"] = node.ID
+	e.Context["last_failure.node_type"] = node.Type()
+	e.Context["last_failure.reason"] = out.FailureReason
+	e.Context["last_failure.at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	e.Context["last_failure.artifacts"] = artifacts
+	e.Context["last_failure.summary"] = buildFailureSummary(node, nodeDir, out)
+}
+
+func buildFailureSummary(node *Node, nodeDir string, out Outcome) string {
+	parts := []string{
+		fmt.Sprintf("failed_node=%s", node.ID),
+		fmt.Sprintf("failed_node_type=%s", node.Type()),
+	}
+	if strings.TrimSpace(out.FailureReason) != "" {
+		parts = append(parts, fmt.Sprintf("failure_reason=%s", out.FailureReason))
+	}
+	if code, ok := readTailSnippet(filepath.Join(nodeDir, "tool.exitcode.txt"), 64); ok {
+		parts = append(parts, fmt.Sprintf("tool_exit_code=%s", strings.TrimSpace(code)))
+	}
+	if s, ok := readTailSnippet(filepath.Join(nodeDir, "tool.stderr.txt"), 600); ok {
+		parts = append(parts, "tool_stderr:\n"+s)
+	}
+	if s, ok := readTailSnippet(filepath.Join(nodeDir, "tool.stdout.txt"), 300); ok {
+		parts = append(parts, "tool_stdout:\n"+s)
+	}
+	if s, ok := readTailSnippet(filepath.Join(nodeDir, "verification.results.json"), 600); ok {
+		parts = append(parts, "verification_results_tail:\n"+s)
+	}
+	if s, ok := readTailSnippet(filepath.Join(nodeDir, "codex.stderr.log"), 600); ok {
+		parts = append(parts, "codex_stderr_tail:\n"+s)
+	}
+	summary := strings.Join(parts, "\n")
+	if len(summary) > 2200 {
+		summary = summary[:2200]
+	}
+	return strings.TrimSpace(summary)
 }
 
 func readTailSnippet(path string, max int) (string, bool) {
@@ -549,6 +608,7 @@ func (codergenHandler) Execute(node *Node, ctx Context, g *Graph, nodeDir string
 	if goal, ok := g.Attrs["goal"]; ok {
 		prompt = strings.ReplaceAll(prompt, "$goal", fmt.Sprintf("%v", goal))
 	}
+	prompt = injectFailureFeedbackPrompt(prompt, ctx)
 	if writeErr := os.WriteFile(filepath.Join(nodeDir, "prompt.md"), []byte(prompt+"\n"), 0o644); writeErr != nil {
 		return Outcome{}, writeErr
 	}
@@ -610,6 +670,34 @@ func (codergenHandler) Execute(node *Node, ctx Context, g *Graph, nodeDir string
 		Notes:              resp.Notes,
 		FailureReason:      resp.FailureReason,
 	}, nil
+}
+
+func injectFailureFeedbackPrompt(prompt string, ctx Context) string {
+	summary, _ := ctx["last_failure.summary"].(string)
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return prompt
+	}
+	nodeID, _ := ctx["last_failure.node_id"].(string)
+	reason, _ := ctx["last_failure.reason"].(string)
+
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(prompt, "\n"))
+	b.WriteString("\n\nFailure feedback (from previous failed stage):\n")
+	if strings.TrimSpace(nodeID) != "" {
+		b.WriteString("- failed_node: ")
+		b.WriteString(strings.TrimSpace(nodeID))
+		b.WriteString("\n")
+	}
+	if strings.TrimSpace(reason) != "" {
+		b.WriteString("- failure_reason: ")
+		b.WriteString(strings.TrimSpace(reason))
+		b.WriteString("\n")
+	}
+	b.WriteString("- details:\n")
+	b.WriteString(summary)
+	b.WriteString("\n")
+	return b.String()
 }
 
 func outcomeFromTestAttrs(node *Node, ctx Context) string {

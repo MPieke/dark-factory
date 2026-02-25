@@ -233,3 +233,17 @@ Decision:
 Why:
 - Generated verification commands are often relative to app directory context.
 - Running all verification commands from workspace root causes avoidable path/cwd failures.
+
+## 21) Failed-stage feedback must be injected into subsequent fix prompts
+Decision:
+- On any stage failure, store structured failure context in run context:
+  - `last_failure.node_id`
+  - `last_failure.node_type`
+  - `last_failure.reason`
+  - `last_failure.summary`
+  - `last_failure.artifacts`
+- Codergen prompts automatically append a `Failure feedback` section when `last_failure.summary` exists.
+
+Why:
+- Avoids fix-loop drift where the agent does not see the concrete failing validation output.
+- Makes feedback plumbing generic across pipelines instead of custom per-DOT prompt wiring.

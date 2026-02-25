@@ -234,3 +234,17 @@ This file records concrete failure modes seen in this repo and the fixes applied
   - Added integration test coverage for configured verification workdir behavior.
 - Prevention (test/check/guardrail):
   - Set explicit `verification.workdir` when command paths are app-relative.
+
+## 20) Fix loops persist when failure details are not passed into fix prompts
+- Symptom:
+  - Pipeline repeatedly cycled `validate_user_scenarios -> fix` while the fix agent changed unrelated code.
+- Root cause:
+  - Runtime only routed on `outcome=fail` and `failure_reason=tool_exit_code_1`.
+  - Concrete failing details (for example model 404 in scenario stderr) were not injected into the next codergen prompt.
+- Fix:
+  - On failed stages, runtime now stores structured context under `last_failure.*`.
+  - Codergen prompts automatically append a `Failure feedback` section sourced from that context.
+  - Added tests that assert failure context storage and fix prompt injection.
+- Prevention (test/check/guardrail):
+  - Treat artifact capture and prompt feedback plumbing as first-class orchestration behavior.
+  - Keep failure summaries concise and bounded to prevent prompt bloat.

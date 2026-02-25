@@ -33,6 +33,7 @@ This repo uses a spec-first, test-first approach with automation as the default 
   - Handler execution with workspace diffs
   - Retry/checkpoint semantics
   - Guardrail enforcement
+  - Failure-feedback propagation (`last_failure.*` context + fix prompt injection)
 - End-to-end tests:
   - Full `RunPipeline` flows and run artifact verification
   - Smoke validation through `scripts/smoke.sh`

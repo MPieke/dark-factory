@@ -39,6 +39,27 @@ func readJSONLTypes(t *testing.T, p string) []string {
 	return out
 }
 
+func readJSONLRecords(t *testing.T, p string) []map[string]any {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	out := []map[string]any{}
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		m := map[string]any{}
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
 func setupRun(t *testing.T, dot string) (workdir, runsdir, pipeline string) {
 	t.Helper()
 	root := t.TempDir()
@@ -457,5 +478,73 @@ func TestVerificationNodeUsesConfiguredWorkdir(t *testing.T) {
 	st, _ := os.ReadFile(filepath.Join(runsdir, "r18", "verify", "status.json"))
 	if !strings.Contains(string(st), `"outcome": "success"`) {
 		t.Fatalf("expected verification success with configured workdir: %s", string(st))
+	}
+}
+
+func TestFailureContextStoredForFixRouting(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	validate [shape=parallelogram, type=tool, tool_command="sh -c 'echo FAIL_DETAIL 1>&2; exit 1'"];
+	fix [shape=box, prompt="Fix based on feedback"];
+	exit [shape=Msquare];
+	start -> validate;
+	validate -> fix [condition="outcome=fail"];
+	fix -> exit [condition="outcome=success"];
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r19"}); err != nil {
+		t.Fatal(err)
+	}
+	cpBytes, err := os.ReadFile(filepath.Join(runsdir, "r19", "checkpoint.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cp Checkpoint
+	if err := json.Unmarshal(cpBytes, &cp); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := cp.Context["last_failure.node_id"].(string); !ok || got != "validate" {
+		t.Fatalf("missing/invalid last_failure.node_id: %#v", cp.Context["last_failure.node_id"])
+	}
+	if got, ok := cp.Context["last_failure.reason"].(string); !ok || !strings.Contains(got, "tool_exit_code_1") {
+		t.Fatalf("missing/invalid last_failure.reason: %#v", cp.Context["last_failure.reason"])
+	}
+	if got, ok := cp.Context["last_failure.summary"].(string); !ok || !strings.Contains(got, "FAIL_DETAIL") {
+		t.Fatalf("missing/invalid last_failure.summary: %#v", cp.Context["last_failure.summary"])
+	}
+}
+
+func TestFixPromptIncludesFailureFeedback(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	validate [shape=parallelogram, type=tool, tool_command="sh -c 'echo MODEL_404 1>&2; exit 1'"];
+	fix [shape=box, prompt="Validation failed.\nFix it."];
+	exit [shape=Msquare];
+	start -> validate;
+	validate -> fix [condition="outcome=fail"];
+	fix -> exit [condition="outcome=success"];
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r20"}); err != nil {
+		t.Fatal(err)
+	}
+	promptBytes, err := os.ReadFile(filepath.Join(runsdir, "r20", "fix", "prompt.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := string(promptBytes)
+	if !strings.Contains(prompt, "Validation failed.") {
+		t.Fatalf("expected base prompt content, got: %s", prompt)
+	}
+	if !strings.Contains(prompt, "Failure feedback") {
+		t.Fatalf("expected injected failure section, got: %s", prompt)
+	}
+	if !strings.Contains(prompt, "MODEL_404") {
+		t.Fatalf("expected failure stderr detail in prompt, got: %s", prompt)
+	}
+	if !strings.Contains(prompt, "validate") {
+		t.Fatalf("expected failed node id in prompt, got: %s", prompt)
 	}
 }

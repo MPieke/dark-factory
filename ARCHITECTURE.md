@@ -78,6 +78,8 @@ Scenario validation contract:
 - `selftest` mode must be deterministic and succeed unless the scenario logic is broken.
 - `live` mode validates real integrations (provider/API/network) when enabled.
 - Shared runner `scripts/scenarios/preflight_scenario.sh` enforces this sequence.
+- On stage failure, engine stores structured feedback in context (`last_failure.*`) from stage artifacts (reason, stderr/stdout tails, and artifact paths).
+- Codergen nodes automatically append a `Failure feedback` section to the prompt when `last_failure.summary` exists.
 
 ## Artifacts
 Per-run directory (`<runsdir>/<run-id>/`):
