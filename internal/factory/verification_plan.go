@@ -13,6 +13,14 @@ type VerificationPlan struct {
 }
 
 func ParseVerificationPlan(raw any) (VerificationPlan, error) {
+	return parseVerificationPlan(raw, "")
+}
+
+func ParseVerificationPlanForWorkspace(raw any, workspace string) (VerificationPlan, error) {
+	return parseVerificationPlan(raw, workspace)
+}
+
+func parseVerificationPlan(raw any, workspace string) (VerificationPlan, error) {
 	var plan VerificationPlan
 	b, err := json.Marshal(raw)
 	if err != nil {
@@ -22,7 +30,7 @@ func ParseVerificationPlan(raw any) (VerificationPlan, error) {
 		return plan, fmt.Errorf("invalid verification plan: %w", err)
 	}
 	for i, f := range plan.Files {
-		clean, err := normalizeRelativePath(f)
+		clean, err := normalizeVerificationPath(f, workspace)
 		if err != nil {
 			return plan, fmt.Errorf("invalid verification file path %q: %w", f, err)
 		}
@@ -41,16 +49,23 @@ func ParseVerificationPlan(raw any) (VerificationPlan, error) {
 	return plan, nil
 }
 
-func normalizeRelativePath(p string) (string, error) {
+func normalizeVerificationPath(p string, workspace string) (string, error) {
 	p = strings.TrimSpace(p)
 	if p == "" {
 		return "", fmt.Errorf("path is empty")
 	}
-	if strings.HasPrefix(p, "/") || filepath.IsAbs(p) {
-		return "", fmt.Errorf("absolute paths are not allowed")
-	}
 	if strings.Contains(p, "~") {
 		return "", fmt.Errorf("~ is not allowed")
+	}
+	if strings.HasPrefix(p, "/") || filepath.IsAbs(p) {
+		if strings.TrimSpace(workspace) == "" {
+			return "", fmt.Errorf("absolute paths are not allowed")
+		}
+		rel, err := filepath.Rel(filepath.Clean(workspace), filepath.Clean(p))
+		if err != nil {
+			return "", fmt.Errorf("absolute path is not under workspace")
+		}
+		p = rel
 	}
 	clean := filepath.ToSlash(filepath.Clean(p))
 	for _, seg := range strings.Split(clean, "/") {

@@ -34,6 +34,7 @@ Think of it as a small state machine:
 - Verification node (deterministic checks from plan):
   - `type=verification` (usually with `shape=parallelogram`)
   - reads plan from context key `verification.plan` by default
+  - optional `verification.workdir` to run verification commands from a relative subdirectory
   - requires `verification.allowed_commands="prefix1,prefix2,..."`
 - Codergen node (agent-driven):
   - default for `shape=box` (or `type=codergen`)

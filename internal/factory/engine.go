@@ -221,6 +221,7 @@ func (e *Engine) executeFrom(startID string) error {
 			_ = appendEvent(e.RunDir, map[string]any{"schema_version": 1, "type": "StageFailed", "node_id": node.ID, "error": err.Error(), "at": time.Now().UTC().Format(time.RFC3339Nano)})
 			_ = appendTrace(e.RunDir, "NodeExecutionErrored", map[string]any{"node_id": node.ID, "error": err.Error()})
 			e.Logger.Error("stage execution errored", "node", node.ID, "error", err)
+			e.logFailureContext(node, nodeDir)
 			return err
 		}
 		if err := writeJSON(filepath.Join(nodeDir, "status.json"), out); err != nil {
@@ -229,6 +230,7 @@ func (e *Engine) executeFrom(startID string) error {
 		if out.Outcome == "fail" {
 			_ = appendEvent(e.RunDir, map[string]any{"schema_version": 1, "type": "StageFailed", "node_id": node.ID, "failure_reason": out.FailureReason, "at": time.Now().UTC().Format(time.RFC3339Nano)})
 			e.Logger.Warn("stage failed", "node", node.ID, "reason", out.FailureReason)
+			e.logFailureContext(node, nodeDir)
 		} else {
 			_ = appendEvent(e.RunDir, map[string]any{"schema_version": 1, "type": "StageCompleted", "node_id": node.ID, "outcome": out.Outcome, "at": time.Now().UTC().Format(time.RFC3339Nano)})
 			e.Logger.Info("stage completed", "node", node.ID, "outcome", out.Outcome)
@@ -270,6 +272,59 @@ func (e *Engine) executeFrom(startID string) error {
 		}
 		current = next
 	}
+}
+
+func (e *Engine) logFailureContext(node *Node, nodeDir string) {
+	paths := map[string]string{
+		"status_path":            filepath.Join(nodeDir, "status.json"),
+		"tool_stdout_path":       filepath.Join(nodeDir, "tool.stdout.txt"),
+		"tool_stderr_path":       filepath.Join(nodeDir, "tool.stderr.txt"),
+		"tool_exitcode_path":     filepath.Join(nodeDir, "tool.exitcode.txt"),
+		"verification_results":   filepath.Join(nodeDir, "verification.results.json"),
+		"verification_plan_path": filepath.Join(nodeDir, "verification.plan.json"),
+		"codex_stdout_path":      filepath.Join(nodeDir, "codex.stdout.log"),
+		"codex_stderr_path":      filepath.Join(nodeDir, "codex.stderr.log"),
+		"codex_response_path":    filepath.Join(nodeDir, "response.md"),
+		"workspace_diff_path":    filepath.Join(nodeDir, "workspace.diff.json"),
+	}
+	attrs := []any{"node", node.ID}
+	for key, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			attrs = append(attrs, key, p)
+		}
+	}
+	e.Logger.Warn("failure artifacts", attrs...)
+
+	if tail, ok := readTailSnippet(filepath.Join(nodeDir, "tool.stderr.txt"), 600); ok {
+		e.Logger.Warn("failure detail", "node", node.ID, "source", "tool.stderr.txt", "snippet", tail)
+	}
+	if tail, ok := readTailSnippet(filepath.Join(nodeDir, "tool.stdout.txt"), 600); ok {
+		e.Logger.Warn("failure detail", "node", node.ID, "source", "tool.stdout.txt", "snippet", tail)
+	}
+	if tail, ok := readTailSnippet(filepath.Join(nodeDir, "codex.stderr.log"), 600); ok {
+		e.Logger.Warn("failure detail", "node", node.ID, "source", "codex.stderr.log", "snippet", tail)
+	}
+	if tail, ok := readTailSnippet(filepath.Join(nodeDir, "response.md"), 600); ok {
+		e.Logger.Warn("failure detail", "node", node.ID, "source", "response.md", "snippet", tail)
+	}
+}
+
+func readTailSnippet(path string, max int) (string, bool) {
+	b, err := os.ReadFile(path)
+	if err != nil || len(b) == 0 {
+		return "", false
+	}
+	if max <= 0 {
+		max = 600
+	}
+	if len(b) > max {
+		b = b[len(b)-max:]
+	}
+	s := strings.TrimSpace(string(b))
+	if s == "" {
+		return "", false
+	}
+	return s, true
 }
 
 func (e *Engine) executeNode(node *Node, nodeDir string) (Outcome, error) {
@@ -597,7 +652,7 @@ func validateToolCommand(cmd string) error {
 	if strings.Contains(cmd, "~") {
 		return fmt.Errorf("tool_command rejected by guardrail: contains ~")
 	}
-	if strings.Contains(cmd, "..") {
+	if containsParentSegmentToken(cmd) {
 		return fmt.Errorf("tool_command rejected by guardrail: contains ..")
 	}
 	tokens := strings.Fields(cmd)
@@ -608,6 +663,29 @@ func validateToolCommand(cmd string) error {
 		}
 	}
 	return nil
+}
+
+func containsParentSegmentToken(cmd string) bool {
+	for i := 0; i+1 < len(cmd); i++ {
+		if cmd[i] != '.' || cmd[i+1] != '.' {
+			continue
+		}
+		prevBoundary := i == 0 || isPathTokenBoundary(cmd[i-1])
+		nextBoundary := i+2 >= len(cmd) || isPathTokenBoundary(cmd[i+2])
+		if prevBoundary && nextBoundary {
+			return true
+		}
+	}
+	return false
+}
+
+func isPathTokenBoundary(b byte) bool {
+	switch b {
+	case '/', ' ', '\t', '\n', '\r', ';', '&', '|', '(', ')', '\'', '"':
+		return true
+	default:
+		return false
+	}
 }
 
 func isExecutableNode(node *Node) bool {

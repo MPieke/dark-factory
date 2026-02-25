@@ -10,17 +10,17 @@ if [ -z "$SCENARIO_SCRIPT" ] || [ -z "$APP_DIR" ]; then
   exit 2
 fi
 
-if [ ! -x "$SCENARIO_SCRIPT" ]; then
-  echo "scenario script must be executable: $SCENARIO_SCRIPT"
+if [ ! -f "$SCENARIO_SCRIPT" ]; then
+  echo "scenario script not found: $SCENARIO_SCRIPT"
   exit 1
 fi
 
 echo "[preflight] selftest: $SCENARIO_SCRIPT $APP_DIR"
-SCENARIO_MODE=selftest "$SCENARIO_SCRIPT" "$APP_DIR"
+SCENARIO_MODE=selftest bash "$SCENARIO_SCRIPT" "$APP_DIR"
 
 if [ "$REQUIRE_LIVE" = "1" ]; then
   echo "[preflight] live: $SCENARIO_SCRIPT $APP_DIR"
-  SCENARIO_MODE=live "$SCENARIO_SCRIPT" "$APP_DIR"
+  SCENARIO_MODE=live bash "$SCENARIO_SCRIPT" "$APP_DIR"
 else
   echo "[preflight] skipping live checks (REQUIRE_LIVE=0)"
 fi

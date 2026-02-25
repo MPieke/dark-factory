@@ -223,3 +223,14 @@ This file records concrete failure modes seen in this repo and the fixes applied
 - Prevention (test/check/guardrail):
   - For builder-isolated pipelines, always set `codex.strict_read_scope=true`.
   - Keep builder specs and orchestrator docs separated, then enforce separation with strict scope.
+
+## 19) Verification command cwd mismatch caused repeated fix loops
+- Symptom:
+  - `verify_plan` repeatedly failed on commands like `gofmt -w main.go main_test.go` with exit code 2.
+- Root cause:
+  - Verification executed commands at workspace root, while generated commands assumed `agent/` cwd.
+- Fix:
+  - Added `verification.workdir` and set it to `agent` in the Agent CLI POC pipeline.
+  - Added integration test coverage for configured verification workdir behavior.
+- Prevention (test/check/guardrail):
+  - Set explicit `verification.workdir` when command paths are app-relative.

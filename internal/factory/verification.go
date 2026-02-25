@@ -79,6 +79,16 @@ func (verificationHandler) Execute(node *Node, ctx Context, _ *Graph, nodeDir st
 	}
 
 	results := verificationResults{CheckedFiles: append([]string{}, plan.Files...), Commands: make([]verificationCommandResult, 0, len(plan.Commands))}
+	workingDir, err := resolveVerificationWorkdir(workspace, node.StringAttr("verification.workdir", ""))
+	if err != nil {
+		return Outcome{
+			SchemaVersion:    1,
+			Outcome:          "fail",
+			SuggestedNextIDs: []string{},
+			ContextUpdates:   map[string]any{},
+			FailureReason:    err.Error(),
+		}, nil
+	}
 	for _, command := range plan.Commands {
 		if err := validateToolCommand(command); err != nil {
 			return Outcome{
@@ -99,7 +109,7 @@ func (verificationHandler) Execute(node *Node, ctx Context, _ *Graph, nodeDir st
 			}, nil
 		}
 		cmd := exec.Command("sh", "-c", command)
-		cmd.Dir = workspace
+		cmd.Dir = workingDir
 		stdout, _ := cmd.StdoutPipe()
 		stderr, _ := cmd.StderrPipe()
 		if err := cmd.Start(); err != nil {
@@ -148,6 +158,31 @@ func (verificationHandler) Execute(node *Node, ctx Context, _ *Graph, nodeDir st
 		SuggestedNextIDs: []string{},
 		ContextUpdates:   map[string]any{},
 	}, nil
+}
+
+func resolveVerificationWorkdir(workspace, configured string) (string, error) {
+	configured = strings.TrimSpace(configured)
+	if configured == "" {
+		return workspace, nil
+	}
+	if strings.HasPrefix(configured, "/") || filepath.IsAbs(configured) {
+		return "", fmt.Errorf("verification.workdir must be relative")
+	}
+	clean := filepath.Clean(configured)
+	for _, seg := range strings.Split(filepath.ToSlash(clean), "/") {
+		if seg == ".." {
+			return "", fmt.Errorf("verification.workdir cannot contain parent segment")
+		}
+	}
+	dir := filepath.Join(workspace, clean)
+	info, err := os.Stat(dir)
+	if err != nil {
+		return "", fmt.Errorf("verification.workdir missing: %s", configured)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("verification.workdir is not a directory: %s", configured)
+	}
+	return dir, nil
 }
 
 func commandAllowed(command string, allowedPrefixes []string) bool {

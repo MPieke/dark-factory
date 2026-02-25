@@ -428,3 +428,34 @@ func TestVerificationNodeAllowsEnvPrefixedGoCommand(t *testing.T) {
 		t.Fatalf("expected verification success: %s", string(st))
 	}
 }
+
+func TestVerificationNodeUsesConfiguredWorkdir(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	generate [
+		shape=box,
+		"test.verification_plan_json"="{\"files\":[\"agent/main.go\",\"agent/main_test.go\"],\"commands\":[\"gofmt -w main.go main_test.go\"]}"
+	];
+	verify [
+		shape=parallelogram,
+		type=verification,
+		"verification.allowed_commands"="gofmt",
+		"verification.workdir"="agent"
+	];
+	exit [shape=Msquare];
+	start -> generate;
+	generate -> verify;
+	verify -> exit [condition="outcome=success"];
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	writeFile(t, filepath.Join(workdir, "agent/main.go"), "package main\nfunc main(){}\n")
+	writeFile(t, filepath.Join(workdir, "agent/main_test.go"), "package main\nimport \"testing\"\nfunc TestX(t *testing.T){}\n")
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r18"}); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := os.ReadFile(filepath.Join(runsdir, "r18", "verify", "status.json"))
+	if !strings.Contains(string(st), `"outcome": "success"`) {
+		t.Fatalf("expected verification success with configured workdir: %s", string(st))
+	}
+}

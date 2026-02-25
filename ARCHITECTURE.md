@@ -70,6 +70,7 @@ Verification stage behavior (`type=verification`):
 - Reads a structured verification plan from context (default key: `verification.plan`).
 - Plan includes required files and commands.
 - Enforces per-node command prefix allowlist (`verification.allowed_commands`).
+- Executes commands from workspace root by default, or from `verification.workdir` when configured.
 - Writes `verification.plan.json` and `verification.results.json`.
 
 Scenario validation contract:

@@ -224,3 +224,12 @@ Decision:
 Why:
 - Prevents accidental reads of repo memory/docs/orchestrator metadata via `..` traversal.
 - Makes builder context explicitly least-privilege instead of convention-based.
+
+## 20) Verification execution directory must be configurable
+Decision:
+- Added `verification.workdir` (relative to workspace) for verification nodes.
+- Verification commands default to workspace root when unset.
+
+Why:
+- Generated verification commands are often relative to app directory context.
+- Running all verification commands from workspace root causes avoidable path/cwd failures.

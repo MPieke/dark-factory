@@ -36,6 +36,7 @@ digraph AgentCliFactoryPOC {
   verify_plan [
     shape=parallelogram,
     type=verification,
+    "verification.workdir"="agent",
     "verification.allowed_commands"="go test,go build,gofmt,bash scripts/scenarios/agent_cli_component_checks.sh,bash scripts/scenarios/agent_cli_user_scenarios.sh,bash scripts/scenarios/preflight_scenario.sh,bash scripts/scenarios/preflight_provider_live.sh"
   ];
 
