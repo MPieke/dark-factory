@@ -165,9 +165,8 @@ func TestAgentCliPocVerificationCommandCWDMismatchFails(t *testing.T) {
 	}
 }
 
-func TestAgentCliPocValidateUserFailureRoutesToFix(t *testing.T) {
+func TestAgentCliPocValidateUserFailureStopsAsUnfixableScope(t *testing.T) {
 	t.Setenv("ATTRACTION_BACKEND", "fake")
-	t.Setenv("ATTRACTION_TEST_STOP_AFTER_NODE", "fix")
 	planJSON := `{"files":["agent/main.go"],"commands":["test -f agent/main.go"]}`
 	workdir, runsdir, pipeline := setupRun(t, buildAgentCliPocDOT(planJSON))
 	writeScenarioHarness(t, workdir)
@@ -175,15 +174,15 @@ func TestAgentCliPocValidateUserFailureRoutesToFix(t *testing.T) {
 	writeFile(t, filepath.Join(workdir, ".user_fail"), "1\n")
 
 	err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "poc-user-fail"})
-	if err == nil || !strings.Contains(err.Error(), "test_stop") {
-		t.Fatalf("expected deterministic stop at fix, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "unfixable_failure_source") {
+		t.Fatalf("expected unfixable failure-source stop, got: %v", err)
 	}
 	status := readStatusJSON(t, filepath.Join(runsdir, "poc-user-fail", "validate_user_scenarios", "status.json"))
 	if status["outcome"] != "fail" {
 		t.Fatalf("expected validate_user_scenarios fail, got: %+v", status)
 	}
-	if _, err := os.Stat(filepath.Join(runsdir, "poc-user-fail", "fix", "status.json")); err != nil {
-		t.Fatalf("expected fix stage to run after user scenario failure: %v", err)
+	if _, err := os.Stat(filepath.Join(runsdir, "poc-user-fail", "fix", "status.json")); err == nil {
+		t.Fatalf("did not expect fix status artifact when scope is unfixable")
 	}
 }
 

@@ -63,6 +63,8 @@ If multiple matching edges exist, highest `weight` wins.
 
 Practical implication:
 - Parent-directory path escapes are blocked (for example `../secret`), but normal Go patterns like `./...` are allowed.
+- Fix-loop scope guard:
+  - If previous failed tool stage references script paths outside the fix node `allowed_write_paths`, runtime stops with `unfixable_failure_source`.
 
 ## Scenario isolation (recommended)
 - If scenario scripts are meant to be holdout validators, do not expose them to agent nodes.

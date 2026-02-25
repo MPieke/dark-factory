@@ -34,6 +34,7 @@ This repo uses a spec-first, test-first approach with automation as the default 
   - Retry/checkpoint semantics
   - Guardrail enforcement
   - Failure-feedback propagation (`last_failure.*` context + fix prompt injection)
+  - Unfixable-scope guardrail (`unfixable_failure_source`) behavior
 - End-to-end tests:
   - Full `RunPipeline` flows and run artifact verification
   - Smoke validation through `scripts/smoke.sh`

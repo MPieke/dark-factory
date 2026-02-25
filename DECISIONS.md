@@ -269,3 +269,11 @@ Why:
 - Prevents known classes of failures from reaching runtime:
   - hardcoded live provider model defaults
   - fixed `/tmp` artifact paths
+
+## 24) Stop fix loops when failure source is outside fix write scope
+Decision:
+- Added runtime guardrail: before a codergen/fix node runs, if the previous failed tool node references script paths outside the current node `allowed_write_paths`, fail immediately with `unfixable_failure_source`.
+
+Why:
+- Prevents loops where the agent cannot legally patch the failing source under current write constraints.
+- Surfaces a clear orchestration-config error instead of spending tokens on impossible fixes.

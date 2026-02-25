@@ -387,6 +387,9 @@ func readTailSnippet(path string, max int) (string, bool) {
 }
 
 func (e *Engine) executeNode(node *Node, nodeDir string) (Outcome, error) {
+	if reason, blocked := e.unfixableFailureSourceReason(node); blocked {
+		return Outcome{}, fmt.Errorf("%s", reason)
+	}
 	h := resolveHandler(node)
 	maxRetries := node.IntAttr("max_retries", 0)
 	allowPartial := node.BoolAttr("allow_partial", false)
@@ -462,6 +465,72 @@ func (e *Engine) executeNode(node *Node, nodeDir string) (Outcome, error) {
 		return out, nil
 	}
 	return out, nil
+}
+
+func (e *Engine) unfixableFailureSourceReason(node *Node) (string, bool) {
+	if !isCodergenNode(node) {
+		return "", false
+	}
+	failedNodeID, _ := e.Context["last_failure.node_id"].(string)
+	failedNodeID = strings.TrimSpace(failedNodeID)
+	if failedNodeID == "" {
+		return "", false
+	}
+	failedNode := e.Graph.Nodes[failedNodeID]
+	if failedNode == nil || failedNode.Type() != "tool" {
+		return "", false
+	}
+	cmd := strings.TrimSpace(failedNode.StringAttr("tool_command", ""))
+	if cmd == "" {
+		return "", false
+	}
+	sourcePaths := extractToolScriptPaths(cmd)
+	if len(sourcePaths) == 0 {
+		return "", false
+	}
+	allowed, err := ParseAllowedWritePaths(node)
+	if err != nil {
+		return fmt.Sprintf("invalid allowed_write_paths on node %s: %v", node.ID, err), true
+	}
+	if len(allowed) == 0 {
+		return "", false
+	}
+	normalized := make([]string, 0, len(allowed))
+	for _, p := range allowed {
+		p = filepath.ToSlash(strings.TrimSpace(p))
+		if p != "" {
+			normalized = append(normalized, p)
+		}
+	}
+	outside := []string{}
+	for _, src := range sourcePaths {
+		if !pathAllowed(src, normalized) {
+			outside = append(outside, src)
+		}
+	}
+	if len(outside) == 0 {
+		return "", false
+	}
+	sort.Strings(outside)
+	return fmt.Sprintf("unfixable_failure_source: failed node %s references %s outside allowed_write_paths for %s", failedNodeID, strings.Join(outside, ","), node.ID), true
+}
+
+func extractToolScriptPaths(cmd string) []string {
+	tokens := strings.Fields(cmd)
+	paths := []string{}
+	for _, tok := range tokens {
+		t := strings.Trim(tok, `"'`)
+		if t == "" || strings.HasPrefix(t, "-") {
+			continue
+		}
+		if strings.Contains(t, "=") {
+			continue
+		}
+		if strings.HasSuffix(t, ".sh") {
+			paths = append(paths, filepath.ToSlash(filepath.Clean(t)))
+		}
+	}
+	return paths
 }
 
 func (e *Engine) writeCheckpoint(last string) error {
@@ -783,6 +852,14 @@ func isExecutableNode(node *Node) bool {
 		return shape == "box" || shape == "parallelogram"
 	}
 	return t == "codergen" || t == "tool"
+}
+
+func isCodergenNode(node *Node) bool {
+	t := node.Type()
+	if t == "" {
+		return node.Shape() == "box"
+	}
+	return t == "codergen"
 }
 
 func snapshotWorkspace(workspace string) (map[string]fileState, error) {

@@ -548,3 +548,44 @@ func TestFixPromptIncludesFailureFeedback(t *testing.T) {
 		t.Fatalf("expected failed node id in prompt, got: %s", prompt)
 	}
 }
+
+func TestFixNodeFailsFastWhenFailureSourceOutsideWriteScope(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	validate [shape=parallelogram, type=tool, tool_command="bash scripts/scenarios/agent_cli_user_scenarios.sh agent"];
+	fix [shape=box, allowed_write_paths="agent/", prompt="Try fix"];
+	exit [shape=Msquare];
+	start -> validate;
+	validate -> fix [condition="outcome=fail"];
+	fix -> exit [condition="outcome=success"];
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r21"})
+	if err == nil {
+		t.Fatal("expected unfixable failure-source error")
+	}
+	if !strings.Contains(err.Error(), "unfixable_failure_source") {
+		t.Fatalf("expected unfixable failure-source error, got: %v", err)
+	}
+}
+
+func TestFixNodeAllowedWhenWriteScopeIncludesFailureSource(t *testing.T) {
+	t.Setenv("ATTRACTION_BACKEND", "fake")
+	dot := `digraph G {
+	start [shape=Mdiamond];
+	validate [shape=parallelogram, type=tool, tool_command="bash scripts/scenarios/agent_cli_user_scenarios.sh agent"];
+	fix [shape=box, allowed_write_paths="agent/,scripts/scenarios/", prompt="Try fix"];
+	exit [shape=Msquare];
+	start -> validate;
+	validate -> fix [condition="outcome=fail"];
+	fix -> exit [condition="outcome=success"];
+	}`
+	workdir, runsdir, pipeline := setupRun(t, dot)
+	if err := RunPipeline(RunConfig{PipelinePath: pipeline, Workdir: workdir, Runsdir: runsdir, RunID: "r22"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(runsdir, "r22", "exit", "status.json")); err != nil {
+		t.Fatalf("expected pipeline to reach exit: %v", err)
+	}
+}

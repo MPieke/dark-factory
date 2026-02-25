@@ -272,3 +272,15 @@ This file records concrete failure modes seen in this repo and the fixes applied
   - Added tests for linter pass/fail behavior.
 - Prevention (test/check/guardrail):
   - Keep scenario lint as required preflight for scenario-driven pipelines.
+
+## 23) Some failures are unfixable under current write scope
+- Symptom:
+  - Pipeline loops on fix even though failure source belongs to scenario tooling outside app write scope.
+- Root cause:
+  - Routing sent failures to a fix node that was not permitted to modify the failing source files.
+- Fix:
+  - Added `unfixable_failure_source` runtime guardrail for codergen nodes.
+  - Guardrail compares failed tool script paths with fix node `allowed_write_paths`.
+- Prevention (test/check/guardrail):
+  - Keep fix node write scope aligned with expected failure-source ownership.
+  - Fail fast when scopes are incompatible.

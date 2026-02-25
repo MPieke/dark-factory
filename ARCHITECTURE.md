@@ -67,6 +67,7 @@ Stage loop behavior:
 - Merge `context_updates` into run context.
 - Write checkpoint.
 - Select next edge based on conditional match (`condition="outcome=..."`), else unconditional; tie-break by highest `weight`.
+- For codergen stages, runtime can stop early with an `unfixable_failure_source` error when the previous failed tool stage references script paths outside current `allowed_write_paths`.
 
 Verification stage behavior (`type=verification`):
 - Reads a structured verification plan from context (default key: `verification.plan`).
