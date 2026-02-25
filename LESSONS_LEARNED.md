@@ -284,3 +284,16 @@ This file records concrete failure modes seen in this repo and the fixes applied
 - Prevention (test/check/guardrail):
   - Keep fix node write scope aligned with expected failure-source ownership.
   - Fail fast when scopes are incompatible.
+
+## 24) Live scenario failures need explicit classification
+- Symptom:
+  - Tool failures from live scenario checks looked identical (`tool_exit_code_1`) regardless of root cause.
+- Root cause:
+  - Preflight wrapper did not classify provider/config failures separately from product behavior failures.
+- Fix:
+  - Added live failure classification to `preflight_scenario.sh`:
+    - `failure_class=infra` with dedicated exit code `86`
+    - `failure_class=product` with original exit code
+- Prevention (test/check/guardrail):
+  - Keep classification patterns up to date with provider error signatures.
+  - Add tests for infra/product classification behavior.

@@ -62,6 +62,7 @@ This repo uses a spec-first, test-first approach with automation as the default 
 - Live scenario scripts should resolve provider models dynamically when possible; avoid hardcoded model defaults.
 - Prefer running scenarios through the shared harness:
   - `bash scripts/scenarios/preflight_scenario.sh <scenario_script> <app_dir>`
+- Preflight harness should classify live failures (`infra` vs `product`) and expose that classification in output.
 - Use `REQUIRE_LIVE=0` only when intentionally skipping external dependency checks.
 
 ## Spec quality requirements

@@ -35,6 +35,7 @@
   - Verification plan schema/parsing and safe relative-path normalization.
 - `scripts/scenarios/preflight_scenario.sh`
   - Shared scenario harness that runs deterministic `selftest` checks and optional `live` checks.
+  - Classifies live failures as `infra` or `product` and emits `failure_class=...` for diagnostics.
 - `scripts/scenarios/lint_scenarios.sh`
   - Scenario guardrail linter for contract and portability violations (hardcoded live model defaults, fixed `/tmp` files).
 

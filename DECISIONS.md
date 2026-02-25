@@ -277,3 +277,13 @@ Decision:
 Why:
 - Prevents loops where the agent cannot legally patch the failing source under current write constraints.
 - Surfaces a clear orchestration-config error instead of spending tokens on impossible fixes.
+
+## 25) Preflight scenario harness must classify live failures
+Decision:
+- `preflight_scenario.sh` now classifies live check failures:
+  - `failure_class=infra` for provider/config/dependency failures (exits `86`)
+  - `failure_class=product` for behavior/spec failures (preserves original non-zero exit)
+
+Why:
+- Distinguishes external dependency failures from application behavior failures.
+- Improves diagnostics and enables deterministic routing policy in future graphs.
