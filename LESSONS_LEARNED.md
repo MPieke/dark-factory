@@ -318,7 +318,7 @@ This file records concrete failure modes seen in this repo and the fixes applied
   - Compose mounted a host Codex binary path that depended on Docker Desktop file-sharing and host-specific symlink layout.
 - Fix:
   - Install Codex CLI in the Docker image (`npm install -g @openai/codex`).
-  - Mount only host Codex config (`$HOME/.codex`) read-only.
+  - Mount only host Codex config (`$HOME/.codex`), with write access.
 - Prevention (test/check/guardrail):
   - Avoid host binary mounts for agent runtimes in Dockerized factory mode.
   - Treat missing/invalid mounted auth config (`CODEX_HOME_HOST_PATH`) as infra configuration failures, not app failures.
@@ -382,3 +382,15 @@ This file records concrete failure modes seen in this repo and the fixes applied
 - Prevention (test/check/guardrail):
   - Keep file-mode preservation in workspace-copy tests.
   - Include at least one e2e run using local executable path wrappers.
+
+## 27) Read-only Codex home mount breaks containerized Codex execution
+- Symptom:
+  - Empirical loop failed at `implement` before any application edits.
+  - `implement/codex.stderr.log` showed Codex cache/helper update failures and sandbox startup errors.
+- Root cause:
+  - Container mounted `/root/.codex` as read-only, but Codex runtime needs write access for cache/helper state.
+- Fix:
+  - Mount `${CODEX_HOME_HOST_PATH:-$HOME/.codex}` to `/root/.codex` without `:ro` in `docker-compose.factory-api.yml`.
+- Prevention (test/check/guardrail):
+  - Keep Codex home writable in Dockerized API mode.
+  - On early implement-stage failure, inspect `codex.stderr.log` first to separate runtime bootstrap failures from product failures.

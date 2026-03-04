@@ -358,6 +358,7 @@ Decision:
 - `factory-api` Docker image installs Codex CLI (`@openai/codex`) during image build.
 - Docker compose mounts only host Codex config:
   - `CODEX_HOME_HOST_PATH=$HOME/.codex`
+  - mount is writable inside container (`/root/.codex`)
 
 Why:
 - Avoids host-specific binary path/linker issues (`/opt/homebrew/...` not shared or incomplete inside container).
@@ -366,3 +367,4 @@ Why:
 Tradeoff:
 - Image build now depends on npm registry/network availability.
 - If mounted Codex home is missing/invalid, API service can run but Codex-backed runs will fail authentication.
+- Writable config mount means containerized Codex can update local cache/helper files on host.

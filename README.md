@@ -234,7 +234,7 @@ API endpoints:
 Notes:
 - Compose mounts this repo to `/workspace`.
 - Codex CLI is installed inside the API image at build time.
-- For Codex auth/session context, compose mounts `${CODEX_HOME_HOST_PATH:-$HOME/.codex}` to `/root/.codex` read-only.
+- For Codex auth/session context, compose mounts `${CODEX_HOME_HOST_PATH:-$HOME/.codex}` to `/root/.codex` with write access (Codex may need to refresh local cache/sandbox helpers).
 
 ## Scenario preflight harness
 

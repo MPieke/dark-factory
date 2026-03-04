@@ -114,7 +114,7 @@ Per-run directory (`<runsdir>/<run-id>/`):
   - `GET /runs` (list runs tracked by API process)
   - `GET /runs/{id}` (single run status)
 - API delegates to the same runtime (`RunPipeline`) and stores run status in-memory, while run artifacts remain on disk under configured `runsdir`.
-- Docker API image installs Codex CLI during image build and mounts host Codex config (`$HOME/.codex`) read-only for auth/session context.
+- Docker API image installs Codex CLI during image build and mounts host Codex config (`$HOME/.codex`) with write access for auth/session context and local Codex runtime cache updates.
 
 `trace.jsonl` includes records such as:
 - `SessionInitialized`
