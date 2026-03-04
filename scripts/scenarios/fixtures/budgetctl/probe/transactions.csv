@@ -1,0 +1,4 @@
+id,date,description,amount,currency,merchant,account
+20,2026-02-20,Paycheck,3000.00,USD,Employer Inc,Bank
+21,2026-02-20,Cafe,-8.50,USD,Blue Bottle,Card
+22,2026-02-21,Cafe,-8.50,USD,Blue Bottle,Card

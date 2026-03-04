@@ -15,6 +15,8 @@
 ## Components
 - `cmd/factory/main.go`
   - CLI entrypoint and argument validation.
+- `cmd/factory-api/main.go`
+  - HTTP API entrypoint for asynchronous pipeline execution.
 - `internal/factory/parser.go`
   - DOT parsing, attribute parsing, and primitive value coercion.
 - `internal/factory/model.go`
@@ -33,6 +35,8 @@
   - Deterministic verification handler that executes structured verification plans from context.
 - `internal/factory/verification_plan.go`
   - Verification plan schema/parsing and safe relative-path normalization.
+- `internal/factoryapi/server.go`
+  - API server for run submission (`POST /runs`), status lookup (`GET /runs/{id}`), and health checks.
 - `scripts/scenarios/preflight_scenario.sh`
   - Shared scenario harness that runs deterministic `selftest` checks and optional `live` checks.
   - Classifies live failures as `infra` or `product` and emits `failure_class=...` for diagnostics.
@@ -102,6 +106,15 @@ Per-run directory (`<runsdir>/<run-id>/`):
   - `codex.args.txt`, `codex.stdout.log`, `codex.stderr.log` (codex backend)
   - `tool.stdout.txt`, `tool.stderr.txt`, `tool.exitcode.txt` (tool)
   - `verification.plan.json`, `verification.results.json` (verification)
+
+## API mode
+- `factory-api` exposes:
+  - `GET /health`
+  - `POST /runs` (async run submission)
+  - `GET /runs` (list runs tracked by API process)
+  - `GET /runs/{id}` (single run status)
+- API delegates to the same runtime (`RunPipeline`) and stores run status in-memory, while run artifacts remain on disk under configured `runsdir`.
+- Docker API image installs Codex CLI during image build and mounts host Codex config (`$HOME/.codex`) read-only for auth/session context.
 
 `trace.jsonl` includes records such as:
 - `SessionInitialized`

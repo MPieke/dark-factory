@@ -59,6 +59,11 @@ This repo uses a spec-first, test-first approach with automation as the default 
   - test evidence conflicts
   - safety or policy intent is unclear
 
+## Empirical-cycle reliability policy
+- Treat backend transport failures as `infra` classification, not product-quality evidence.
+- For codergen-backed experiments, retry transient transport failures before scoring hypotheses.
+- Mark hypothesis outcomes as `unknown` when generation fails before validators run.
+
 ## Scenario preflight policy
 - Scenario scripts should implement `SCENARIO_MODE=selftest|live`.
 - `selftest` must not require external services and should fail only for scenario logic defects.

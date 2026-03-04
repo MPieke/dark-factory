@@ -1,0 +1,5 @@
+id,date,description,amount,currency,merchant,account
+10,2026-02-10,Coffee beans,-16.00,USD,Blue Bottle Roasters,Card
+11,2026-02-11,Monthly pay,2600.00,USD,Employer Inc,Bank
+12,2026-02-12,Farmers market,-23.80,USD,Local Market,Card
+13,2026-02-13,Farmers market repeat,-10.20,USD,Local Market,Card

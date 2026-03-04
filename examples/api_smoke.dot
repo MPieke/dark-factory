@@ -1,0 +1,1 @@
+digraph G { start [shape=Mdiamond]; exit [shape=Msquare]; start -> exit; }

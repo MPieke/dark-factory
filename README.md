@@ -14,6 +14,7 @@ At a high level, it:
 ## What this repo contains
 
 - `cmd/factory/main.go`: CLI entrypoint.
+- `cmd/factory-api/main.go`: HTTP API service entrypoint.
 - `internal/factory/parser.go`: DOT parser.
 - `internal/factory/validate.go`: graph validation and guardrails.
 - `internal/factory/engine.go`: run engine, handlers, artifacts, resume logic.
@@ -197,6 +198,43 @@ Run the included smoke test:
 ```bash
 bash scripts/smoke.sh
 ```
+
+## API service mode (optional)
+
+Start Dockerized API:
+
+```bash
+bash scripts/factory-api-up.sh
+```
+
+Stop:
+
+```bash
+bash scripts/factory-api-down.sh
+```
+
+Restart:
+
+```bash
+bash scripts/factory-api-restart.sh
+```
+
+Submit/poll a run via API:
+
+```bash
+bash scripts/factory-api-run.sh examples/hello_world.dot /workspace /workspace/.runs demo false
+```
+
+API endpoints:
+- `GET /health`
+- `POST /runs`
+- `GET /runs`
+- `GET /runs/{id}`
+
+Notes:
+- Compose mounts this repo to `/workspace`.
+- Codex CLI is installed inside the API image at build time.
+- For Codex auth/session context, compose mounts `${CODEX_HOME_HOST_PATH:-$HOME/.codex}` to `/root/.codex` read-only.
 
 ## Scenario preflight harness
 

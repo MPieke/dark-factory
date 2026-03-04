@@ -338,3 +338,31 @@ Decision:
 Why:
 - Reduces avoidable `verify_plan` failures caused by agents proposing disallowed commands.
 - Moves policy enforcement earlier in the loop while keeping runtime verification as the final gate.
+
+## 30) Add API execution mode to decouple orchestration process lifecycle
+Decision:
+- Added `factory-api` with async run submission and status endpoints.
+- API calls the same runtime (`RunPipeline`) used by CLI mode.
+- Dockerized API support added via compose + start/stop/restart scripts.
+
+Why:
+- Enables long-running run orchestration without tying lifecycle to an interactive shell session.
+- Supports external callers and experiment harnesses that should not spawn `factory run` directly.
+- Improves operational ergonomics for autonomous loops (submit/poll/report).
+
+Tradeoff:
+- API run status is in-memory for process lifetime; persistent source of truth remains run artifacts under `runsdir`.
+
+## 31) Dockerized API bundles Codex CLI and mounts host config only
+Decision:
+- `factory-api` Docker image installs Codex CLI (`@openai/codex`) during image build.
+- Docker compose mounts only host Codex config:
+  - `CODEX_HOME_HOST_PATH=$HOME/.codex`
+
+Why:
+- Avoids host-specific binary path/linker issues (`/opt/homebrew/...` not shared or incomplete inside container).
+- Makes Docker startup reproducible across machines without requiring host binary mounts.
+
+Tradeoff:
+- Image build now depends on npm registry/network availability.
+- If mounted Codex home is missing/invalid, API service can run but Codex-backed runs will fail authentication.

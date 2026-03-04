@@ -297,6 +297,32 @@ This file records concrete failure modes seen in this repo and the fixes applied
   - Avoid hardcoded live model defaults in scenario scripts.
   - Require scenario scripts to use dynamic provider model discovery or explicit env override.
 
+## 25) Backend transport failures can invalidate empirical conclusions
+- Symptom:
+  - Empirical cycle run failed at `implement` with repeated Codex stream disconnects before any app artifact was generated.
+  - Downstream scenario/probe outcomes remained unknown, which could be misread as product failure.
+- Root cause:
+  - External backend transport instability (`stream disconnected before completion`) interrupted codergen execution.
+- Fix:
+  - Added retry + classification logic in `experiments/budgetctl/run_empirical_cycle.sh`.
+  - Runner now classifies this as `infra_backend_transport` and reports incomplete hypothesis outcomes explicitly.
+- Prevention (test/check/guardrail):
+  - Separate `infra` vs `product` failure classes in empirical reports.
+  - Retry transient backend transport failures before concluding on software quality.
+
+## 26) Host-mounted Codex binaries are brittle in Docker on macOS
+- Symptom:
+  - `docker compose up` failed with mount-denied errors for `/opt/homebrew/bin/codex`.
+  - Even when mount paths are adjusted, symlinked host installs can be incomplete inside container.
+- Root cause:
+  - Compose mounted a host Codex binary path that depended on Docker Desktop file-sharing and host-specific symlink layout.
+- Fix:
+  - Install Codex CLI in the Docker image (`npm install -g @openai/codex`).
+  - Mount only host Codex config (`$HOME/.codex`) read-only.
+- Prevention (test/check/guardrail):
+  - Avoid host binary mounts for agent runtimes in Dockerized factory mode.
+  - Treat missing/invalid mounted auth config (`CODEX_HOME_HOST_PATH`) as infra configuration failures, not app failures.
+
 ## 22) Scenario bugs need fail-fast lint, not runtime discovery
 - Symptom:
   - Scenario incompatibilities were discovered only after long implement/fix cycles.

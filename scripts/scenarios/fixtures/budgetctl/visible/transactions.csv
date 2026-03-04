@@ -1,0 +1,5 @@
+id,date,description,amount,currency,merchant,account
+1,2026-02-01,Coffee shop,-5.20,USD,Blue Bottle,Card
+2,2026-02-02,Groceries,-41.10,USD,Trader Joe's,Card
+3,2026-02-03,Salary,2500.00,USD,Employer Inc,Bank
+4,2026-02-04,Unknown debit,-7.00,USD,Misc Shop,Card
